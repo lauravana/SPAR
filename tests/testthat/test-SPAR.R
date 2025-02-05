@@ -43,8 +43,9 @@ test_that("Returned coef and preds are correct for fixed screening and projectio
   RP2@x <- (-1)^(1:nsc)
 
   spar_res <- spar(x,y,
-                   nummods=c(2),inds = list(1:(2*nrow(x)),
-                                            500+1:(2*nrow(x))),
+                   nummods=c(2),
+                   inds = list(1:(2*nrow(x)),
+                               500+1:(2*nrow(x))),
                    RPMs = list(RP1,RP2))
   sparcoef <- coef(spar_res)
   pred     <- predict(spar_res,xnew=xnew)
@@ -98,9 +99,10 @@ test_that("Columns with zero sd get ceofficient 0", {
 test_that("Thresholding can be avoided ", {
   x <- example_data$x
   y <- example_data$y
-  spar_res <- spar(x, y, nus = 0)
+  set.seed(123)
+  spar_res <- spar(x, y, nus = 0, model = spar_glm())
   sparcoef <- coef(spar_res)
-  expect_equal(sparcoef$beta[c(1,10)],c(0,0))
+  expect_equal(sparcoef$beta[c(4,10)],c(0,0))
 })
 
 test_that("Data splitting delivers different results", {

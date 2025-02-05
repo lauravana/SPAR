@@ -40,6 +40,7 @@ constructor_screencoef <- function(name, generate_fun) {
           (attr(out, "type") == "prob" | attr(out, "type") == "fixed")
       )
     }
+    if (is.null(attr(out, "reuse_in_rp"))) attr(out, "reuse_in_rp") <- FALSE
     class(out) <- c("screencoef")
     return(out)
   }

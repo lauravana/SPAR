@@ -10,7 +10,7 @@
 #' @param model function creating a "\code{sparmodel}" object; defaults to \code{spar_glmnet()}.
 #' @param rp function creating a "\code{randomprojection}" object.
 #' @param screencoef function creating a "\code{screeningcoef}" object
-#' @param nfolds number of folds to use for cross-validation; should be greater than 2, defaults to 10.
+#' @param nfolds number of folds to use for cross-validation; should be at least 2, defaults to 10.
 #' @param nnu number of different threshold values \eqn{\nu} to consider for thresholding;
 #'        ignored when \code{nus} is provided; defaults to 20.
 #' @param nus optional vector of \eqn{\nu}'s to consider for thresholding;
@@ -78,35 +78,56 @@ spar.cv <- function(x, y,
                     measure = c("deviance","mse","mae","class","1-auc"),
                     ...
 ) {
-
+  # Set up and checks ----
+  n <- length(y)
+  stopifnot("Length of y does not fit nrow(x)." = n == nrow(x))
+  stopifnot("Response y must be numeric." = is.numeric(y))
+  stopifnot("nfolds must be at least 2." = nfolds >= 2)
   stopifnot("matrix" %in% class(x) |"data.frame" %in% class(x))
   x <- as.matrix(x)
-  if (!class(x[1,1])%in%c("numeric","integer")) {
+  if (!is.numeric(x[1,1])) {
     stop("There are non-numeric data entries, numerical matrix needed!")
   }
-  p <- ncol(x)
-  n <- nrow(x)
 
-  SPARres <- spar(x, y, family = family, model = model,
-                  rp = rp, screencoef = screencoef,
-                  nnu = nnu,
-                  nummods = nummods,
-                  measure = measure, ...)
+  measure <- match.arg(measure)
+
+  # Ensure back compatibility ----
+  args <- list(...)
+  arg_list <- check_and_set_args(args, family, model,
+                                 screencoef, rp,  measure)
+  model <- arg_list$model; rp <- arg_list$rp
+  screencoef <- arg_list$screencoef; measure <- arg_list$measure
+
+  # Run initial spar algorithm ----
+  SPARres <- spar_algorithm(x = x, y = y,
+                        family = family,
+                        model = model, rp = rp, screencoef = screencoef,
+                        xval = NULL, yval = NULL,
+                        nnu = nnu, nus = nus,
+                        nummods = nummods,
+                        measure = measure,
+                        inds = NULL, RPMs = NULL)
+  # SPARres <- spar(x, y, family = family, model = model,
+  #                 rp = rp,
+  #                 screencoef = screencoef,
+  #                 nnu = nnu,
+  #                 nummods = nummods,
+  #                 measure = measure, ...)
 
   val_res <- SPARres$val_res
   folds <- sample(cut(seq_len(n), breaks = nfolds, labels=FALSE))
   for (k in seq_len(nfolds)) {
-    fold_ind <- which(folds == k)
-    foldSPARres <- spar(x[-fold_ind,SPARres$xscale>0],y[-fold_ind],
+    fold_id <- (folds == k)
+    foldSPARres <- spar_algorithm(x[!fold_id,SPARres$xscale>0],y[!fold_id],
                         family = family, model = model,
-                        xval = x[fold_ind,SPARres$xscale>0],
-                        yval = y[fold_ind],
+                        xval = x[fold_id,SPARres$xscale>0],
+                        yval = y[fold_id],
                         rp = rp, screencoef = screencoef,
                         nus = SPARres$nus,
                         inds = SPARres$inds,
                         RPMs = SPARres$RPMs,
                         nummods = nummods,
-                        measure = measure, ...)
+                        measure = measure)
     val_res <- rbind(val_res,foldSPARres$val_res)
   }
 
@@ -323,9 +344,11 @@ plot.spar.cv <- function(x,
   plot_along <- match.arg(plot_along)
   opt_par <- match.arg(opt_par)
   mynummod <- nummod
-  my_val_sum <- dplyr::rename(spar_res$val_sum,
-                              Meas="mMeas",
-                              numAct="mNumAct")
+  my_val_sum <- spar_res$val_sum
+  colnames(my_val_sum)[match(c("mMeas", "mNumAct"),colnames(my_val_sum))] <- c("Meas", "numAct")
+  # my_val_sum <- dplyr::rename(spar_res$val_sum,
+  #                             Meas="mMeas",
+  #                             numAct="mNumAct")
 
   if (plot_type=="res-vs-fitted") {
     if (is.null(xfit) | is.null(yfit)) {
@@ -347,7 +370,7 @@ plot.spar.cv <- function(x,
       tmp_df <- subset(my_val_sum,nummod==mynummod)
       ind_min <- which.min(tmp_df$Meas)
 
-      allowed_ind <- tmp_df$Meas<tmp_df$Meas[ind_min]+tmp_df$sdMeas[ind_min]
+      allowed_ind <- tmp_df$Meas < (tmp_df$Meas+tmp_df$sdMeas)[ind_min]
       ind_1se <- which.min(tmp_df$numAct[allowed_ind])
 
       res <- ggplot2::ggplot(data = tmp_df,
@@ -373,7 +396,7 @@ plot.spar.cv <- function(x,
                                    y = c(tmp_df$Meas[ind_min],tmp_df$Meas[allowed_ind][ind_1se]))) +
         ggplot2::annotate("segment",x = tmp_df$nnu[ind_min],
                           y = tmp_df$Meas[ind_min] + tmp_df$sdMeas[ind_min],
-                          xend = tmp_df$nnu[allowed_ind][ind_1se]+1,
+                          xend = tmp_df$nnu[allowed_ind][ind_1se],
                           yend = tmp_df$Meas[ind_min] + tmp_df$sdMeas[ind_min],
                           color=2,linetype=2)
     } else {
@@ -403,8 +426,10 @@ plot.spar.cv <- function(x,
                             color=2,show.legend = FALSE,
                             data=data.frame(x = c(tmp_df$nummod[ind_min],tmp_df$nummod[allowed_ind][ind_1se]),
                                             y = c(tmp_df$Meas[ind_min],tmp_df$Meas[allowed_ind][ind_1se]))) +
-        ggplot2::annotate("segment",x = tmp_df$nummod[ind_min], y = tmp_df$Meas[ind_min] + tmp_df$sdMeas[ind_min],
-                          xend = tmp_df$nummod[allowed_ind][ind_1se], yend = tmp_df$Meas[ind_min] + tmp_df$sdMeas[ind_min],
+        ggplot2::annotate("segment",x = tmp_df$nummod[ind_min],
+                          y = tmp_df$Meas[ind_min] + tmp_df$sdMeas[ind_min],
+                          xend = tmp_df$nummod[allowed_ind][ind_1se],
+                          yend = tmp_df$Meas[ind_min] + tmp_df$sdMeas[ind_min],
                           color=2,linetype=2)
     }
   } else if (plot_type=="Val_numAct") {

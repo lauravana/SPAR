@@ -114,76 +114,43 @@ spar <- function(x, y,
                  nummods = c(20),
                  measure = c("deviance","mse","mae","class","1-auc"),
                  inds = NULL, RPMs = NULL,
+                 parallel = c("no", "multicore", "snow"),
                  ...) {
 
+  # Set up and checks ----
+  measure <- match.arg(measure)
+  stopifnot("Length of y does not fit nrow(x)." = length(y) == nrow(x))
+  stopifnot("Response y must be numeric." = is.numeric(y))
   # Ensure back compatibility ----
   args <- list(...)
+  arg_list <- check_and_set_args(args, family, model,
+                                 screencoef, rp,  measure)
+  model <- arg_list$model; rp <- arg_list$rp
+  screencoef <- arg_list$screencoef; measure <- arg_list$measure
 
+  # Call SPAR algorithm ----
+  res <- spar_algorithm(x = x, y = y,
+                        family = family,
+                        model = model, rp = rp, screencoef = screencoef,
+                        xval = xval, yval = yval,
+                        nnu = nnu, nus = nus,
+                        nummods = nummods,
+                        measure = measure,
+                        inds = inds, RPMs = RPMs)
+  return(res)
 
-  if (is.null(screencoef)) screencoef <- screen_glmnet()
-  if (!is.null(args$nscreen)) attr(screencoef, "nscreen") <- args$nscreen
-  if (!is.null(args$split_data))  attr(screencoef, "split_data") <- args$split_data
+}
 
-
-  ##  Check if the old argument name 'old_arg' is used
-  if (!is.null(args$type.measure)) {
-    if (!is.null(measure)) {
-      warning("Both 'measure' and deprecated 'type.measure' were provided. Using 'measure'.")
-    } else {
-      # Assign the value from 'old_arg' to 'new_arg' if 'new_arg' is not provided
-      measure <- args$type.measure
-      warning("'type.measure' is deprecated. Please use 'measure' instead.")
-    }
-  }
-  if (!is.null(args$type.rpm)) {
-    if (!is.null(rp)) {
-      warning("Both 'rp' and deprecated 'type.rpm' were provided. Using 'rp'.")
-    } else {
-      # Assign the value from 'old_arg' to 'new_arg' if 'new_arg' is not provided
-      rp <- switch(args$type.rpm,
-                   "cw"           = rp_cw(data = FALSE),
-                   "cwdatadriven" = rp_cw(data = TRUE),
-                   "gaussian"     = rp_gaussian(),
-                   "sparse"       = rp_sparse(psi = 0.1),
-                   stop("Provided 'type.rpm' not implemented."))
-      warning("'type.rpm' is deprecated. Please use 'rp' instead.")
-    }
-  }
-  if (!is.null(args$type.screening)) {
-    if (!is.null(screencoef)) {
-      warning("Both 'screencoef' and deprecated 'type.screening' were provided. Using 'screencoef'.")
-    } else {
-      # Assign the value from 'old_arg' to 'new_arg' if 'new_arg' is not provided
-      screencoef <- switch(args$type.screening,
-                           "ridge" = screen_glmnet(),
-                           "marglik" = screen_marglik(),
-                           "corr" = screen_cor(),
-                           stop("Provided 'type.screening' not implemented."))
-      warning("'type.screening' is deprecated. Please use 'screencoef' instead.")
-    }
-  }
-  ## TODO
-  if (is.null(rp)) rp <- rp_cw(data = TRUE)
-  if (!is.null(args$mslow)) attr(rp, "mslow") <- args$mslow
-  if (!is.null(args$msup))  attr(rp, "msup") <- args$msup
-
-  if (is.null(model)) {
-    if (family$family == "gaussian" && family$link == "identity") {
-      model <- spar_glm()
-    } else {
-      model <- spar_glmnet()
-    }
-  }
-
-  # Setup and Checks ----
+spar_algorithm <- function(x, y,
+                           family, model, rp, screencoef,
+                           xval = NULL, yval = NULL,
+                           nnu, nus,
+                           nummods, measure,
+                           inds = NULL, RPMs = NULL,
+                           parallel){
+  # Start SPAR algorithm
   p <- ncol(x)
   n <- nrow(x)
-
-
-  measure <- match.arg(measure)
-  stopifnot(length(y) == n)
-  stopifnot(is.numeric(y))
-
   # Scaling the x matrix ----
   xcenter <- colMeans(x)
   xscale  <- apply(x, 2, sd)
@@ -241,17 +208,6 @@ spar <- function(x, y,
   } else {
     nscreen <- attr(screencoef, "nscreen")
   }
-
-  ## Update RP with data only at the beginning if possible, not in each RP! ----
-  if (is.null(attr(rp, "family"))) {
-    attr(rp, "family") <- family
-  }
-  if (!is.null(rp$update_data_fun)) {
-    rp <- rp$update_data_fun(rp = rp,
-                             x = z[scr_inds,],
-                             y = yz[scr_inds, ])
-  }
-
   mslow <- attr(rp, "mslow")
   if (is.null(mslow)) mslow <- ceiling(log(p))
   msup <- attr(rp, "msup")
@@ -269,9 +225,21 @@ spar <- function(x, y,
     inc_probs <- abs(scr_coef)
     max_inc_probs <- max(inc_probs)
     inc_probs <- inc_probs/max_inc_probs
+    attr(screencoef, "inc_prob") <- inc_probs
   } else {
     scr_coef <- NULL
     message("nscreen >= p. No screening performed.")
+  }
+
+  ## Update RP with data only at the beginning if possible, not in each RP! ----
+  if (is.null(attr(rp, "family"))) {
+    attr(rp, "family") <- family
+  }
+  if (!is.null(rp$update_data_fun)) {
+    rp <- rp$update_data_fun(rp = rp,
+                             x = z[scr_inds,],
+                             y = yz[scr_inds, ],
+                             screencoef = screencoef)
   }
 
   max_num_mod <- max(nummods)
@@ -358,8 +326,8 @@ spar <- function(x, y,
 
   if (is.null(nus)) {
     if (nnu>1) {
-      nus <- c(0, quantile(abs(betas_std@x),
-                           probs=seq_len(nnu-1)/(nnu-1)))
+      nus <- unname(c(0, quantile(abs(betas_std@x),
+                           probs=seq_len(nnu-1)/(nnu-1))))
     } else {
       nus <- 0
     }
@@ -378,40 +346,12 @@ spar <- function(x, y,
     xval <- x
   }
 
-  if (measure == "deviance") {
-    val.meas <- function(yval,eta_hat) {
-      return(sum(family$dev.resids(yval,family$linkinv(eta_hat),1)))
-    }
-  } else if (measure == "mse") {
-    val.meas <- function(yval,eta_hat) {
-      return(mean((yval-family$linkinv(eta_hat))^2))
-    }
-  } else if (measure == "mae") {
-    val.meas <- function(yval,eta_hat) {
-      return(mean(abs(yval-family$linkinv(eta_hat))))
-    }
-  } else if (measure == "class") {
-    stopifnot(family$family=="binomial")
-    val.meas <- function(yval,eta_hat) {
-      return(mean(yval!=round(family$linkinv(eta_hat))))
-    }
-  } else if (measure=="1-auc") {
-    stopifnot(family$family=="binomial")
-    val.meas <- function(yval,eta_hat) {
-      if (var(yval)==0) {
-        res <- NA
-      } else {
-        phat <- prediction(family$linkinv(eta_hat), yval)
-        res <- 1-performance(phat, measure="auc")@y.values[[1]]
-      }
-      return(res)
-    }
-  }
+  val.meas <- get_val_measure_function(measure, family)
 
-  for (nummod in nummods) {
-    coef <- betas_std[,1:nummod,drop=FALSE]
+  tabnummodres <- lapply(nummods,  function(nummod) {
+    coef <- betas_std[,seq_len(nummod),drop=FALSE]
     abscoef <- abs(coef)
-    tabres <- sapply(1:nnu, function(l){
+    tabres <- lapply(seq_len(nnu), function(l){
       thresh <- nus[l]
       tmp_coef <- coef
       tmp_coef[abscoef<thresh] <- 0
@@ -419,22 +359,32 @@ spar <- function(x, y,
       avg_coef <- rowMeans(tmp_coef)
       tmp_beta <- numeric(p)
       tmp_beta[xscale>0] <- yscale*avg_coef/(xscale[xscale>0])
-      tmp_intercept <- mean(intercepts[1:nummod]) +
-        as.numeric(ycenter - sum(xcenter*tmp_beta) )
-      eta_hat <- xval%*%tmp_beta + tmp_intercept
-      c(l,
-        thresh,
-        nummod,
-        sum(tmp_beta!=0),
-        val.meas(yval,eta_hat)
+      tmp_intercept <- mean(intercepts[seq_len(nummod)]) +
+        drop(ycenter - sum(xcenter*tmp_beta) )
+      eta_hat <- (xval %*% tmp_beta) + tmp_intercept
+
+      c(nnu = l,
+        nu = unname(thresh),
+        nummod = nummod,
+        numAct = sum(tmp_beta!=0),
+        Meas = val.meas(yval,eta_hat)
       )
     })
-    rownames(tabres) <- c("nnu","nu","nummod","numAct","Meas")
-    val_res <- rbind(val_res,data.frame(t(tabres)))
-  }
+    out <- do.call("rbind", tabres)
+    colnames(out) <- c("nnu","nu","nummod","numAct","Meas")
+    out
+  })
+  val_res <- do.call("rbind.data.frame", tabnummodres)
   betas <- Matrix(data=c(0),p,max_num_mod,sparse = TRUE)
   betas[xscale>0,] <- betas_std
 
+
+  ## Clean up
+  family_str <- paste0(family$family, "(", family$link, ")")
+  # attr(rp,"family") <- paste0(attr(rp,"family")$family, "(",
+  #                         attr(rp,"family")$link, ")")
+  # attr(screencoef,"family") <- paste0(attr(screencoef,"family")$family, "(",
+  #                             attr(screencoef,"family")$link, ")")
   res <- list(betas = betas, intercepts = intercepts,
               scr_coef = scr_coef,
               inds = inds, RPMs = RPMs,
@@ -442,16 +392,16 @@ spar <- function(x, y,
               nus = nus, nummods = nummods,
               ycenter = ycenter, yscale = yscale,
               xcenter = xcenter, xscale = xscale,
-              family = family,
+              family = family_str,
               measure = measure,
               rp = rp,
               screencoef = screencoef
   )
+
   attr(res,"class") <- "spar"
 
   return(res)
 }
-
 #' coef.spar
 #'
 #' Extract coefficients from spar object
@@ -538,6 +488,7 @@ predict.spar <- function(object,
   if (is.null(coef)) {
     coef <- coef(object,nummod,nu)
   }
+  object$family <- eval(parse(text = object$family))
   if (avg_type=="link") {
     if (type=="link") {
       res <- as.numeric(xnew%*%coef$beta + coef$intercept)

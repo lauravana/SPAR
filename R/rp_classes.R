@@ -31,7 +31,7 @@ constructor_randomprojection <- function(name, generate_fun,
   ## Checks
   stopifnot(names(formals(generate_fun)) %in% c("rp", "m", "included_vector"))
   if (!is.null(update_data_fun)) {
-    stopifnot("Function update_data_fun should have arguments rp, x, y."=names(formals(update_data_fun)) %in% c("rp", "x", "y"))
+    stopifnot("Function update_data_fun should have arguments rp, x, y, screencoef."=names(formals(update_data_fun)) %in% c("rp", "x", "y", "screencoef"))
   }
   if (!is.null(update_rpm_w_data)) {
     stopifnot(
@@ -48,7 +48,7 @@ constructor_randomprojection <- function(name, generate_fun,
     attributes(out) <- c(attributes(out), attr)
     if (is.null(attr(out, "data"))) {
       attr(out, "data") <- ifelse(is.null(out$update_data_fun),
-                                      FALSE, TRUE)
+                                  FALSE, TRUE)
     }
     class(out) <- c("randomprojection")
     return(out)
@@ -191,40 +191,47 @@ generate_cw <- function(rp, m, included_vector) {
   return(RM)
 }
 
-update_data_cw <- function(rp, x, y) {
+update_data_cw <- function(rp, x, y, screencoef) {
   n <- NROW(x)
   p <- NCOL(x)
-  if (is.null(rp$control$family)) {
-    rp$control$family <- attr(rp, "family")
-  }
-  family <- rp$control$family
-
-  if (family$family=="gaussian") {
-    dev.ratio_cutoff <- 0.999
+  # dots <- list(...)
+  if (attr(screencoef, "reuse_in_rp")) {
+    scr_coef <- attr(screencoef, "importance")
+    inc_probs <- attr(screencoef, "inc_prob")
   } else {
-    dev.ratio_cutoff <- 0.8
+    if (is.null(rp$control$family)) {
+      rp$control$family <- attr(rp, "family")
+    }
+    family <- rp$control$family
+
+    if (family$family=="gaussian") {
+      dev.ratio_cutoff <- 0.999
+    } else {
+      dev.ratio_cutoff <- 0.8
+    }
+
+    if (is.null(rp$control$alpha)) rp$control$alpha <-  0
+    if (is.null(rp$control$lambda.min.ratio)) {
+      tmp_sc <- apply(x, 2, function(col) sqrt(var(col)*(n-1)/n))
+      x2 <- scale(x, center = colMeans(x), scale = tmp_sc)
+      ytX <- crossprod(y, x2[,tmp_sc > 0])
+      lam_max <- 1000 * max(abs(ytX))/n *
+        family$mu.eta(family$linkfun(mean(y)))/
+        family$variance(mean(y))
+      rp$control$lambda.min.ratio <- min(0.01, 1e-4 / lam_max)
+    }
+
+    control_glmnet <- rp$control[names(rp$control)  %in% names(formals(glmnet))]
+    glmnet_res <- do.call(function(...)
+      glmnet(x=x, y=y, ...), control_glmnet)
+
+    lam <- min(glmnet_res$lambda[glmnet_res$dev.ratio <= dev.ratio_cutoff])
+    scr_coef <- coef(glmnet_res,s=lam)[-1]
+    inc_probs <- abs(scr_coef)
+    max_inc_probs <- max(inc_probs)
+    attr(rp, "diagvals") <- scr_coef/max_inc_probs
   }
-
-  if (is.null(rp$control$alpha)) rp$control$alpha <-  0
-  if (is.null(rp$control$lambda.min.ratio)) {
-    tmp_sc <- apply(x, 2, function(col) sqrt(var(col)*(n-1)/n))
-    x2 <- scale(x, center = colMeans(x), scale = tmp_sc)
-    ytX <- crossprod(y, x2[,tmp_sc > 0])
-    lam_max <- 1000 * max(abs(ytX))/n *
-      family$mu.eta(family$linkfun(mean(y)))/
-      family$variance(mean(y))
-    rp$control$lambda.min.ratio <- min(0.01, 1e-4 / lam_max)
-  }
-
-  control_glmnet <- rp$control[names(rp$control)  %in% names(formals(glmnet))]
-  glmnet_res <- do.call(function(...)
-    glmnet(x=x, y=y, ...), control_glmnet)
-
-  lam <- min(glmnet_res$lambda[glmnet_res$dev.ratio <= dev.ratio_cutoff])
-  scr_coef <- coef(glmnet_res,s=lam)[-1]
-  inc_probs <- abs(scr_coef)
-  max_inc_probs <- max(inc_probs)
-  attr(rp, "diagvals") <- scr_coef/max_inc_probs
+  attr(rp, "diagvals") <- scr_coef/max(inc_probs)
   return(rp)
 }
 

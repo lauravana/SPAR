@@ -24,9 +24,9 @@ due to the fact that screening can be employed pre-projection.}
 
 \item{update_data_fun}{function for updating the randomprojection object with
 information from the data. This
-function should have with arguments \code{rp}, which is a randomprojection
-object and \code{data}, which is a list containing \code{x} (the matrix of predictors)
-and \code{y} the vector of responses.}
+function should have arguments \code{rp}, which is a randomprojection
+object and \code{x} (the matrix of predictors)
+and \code{y} (the vector of responses).}
 
 \item{update_rpm_w_data}{function for updating the random projection matrix with data.
 This can be used for the case where a list of random projection matrices is

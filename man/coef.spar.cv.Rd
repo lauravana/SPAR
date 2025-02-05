@@ -9,7 +9,9 @@
 \arguments{
 \item{object}{result of spar.cv function of class "spar.cv".}
 
-\item{opt_par}{one of c("1se","best"), chooses whether to select the best pair of nus and nummods according to CV-Meas, or the sparsest solution within one sd of that optimal CV-Meas;
+\item{opt_par}{one of c("1se","best"), chooses whether to select the best
+pair of nus and nummods according to CV-Meas, or the sparsest solution within
+one sd of that optimal CV-Meas;
 ignored when nummod and nu are given}
 
 \item{nummod}{optional number of models used to form coefficients}
