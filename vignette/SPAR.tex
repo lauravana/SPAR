@@ -147,7 +147,7 @@
 \makeatletter
 \makeatother
 \makeatletter
-\ifdefined\Shaded\renewenvironment{Shaded}{\begin{tcolorbox}[boxrule=0pt, interior hidden, enhanced, borderline west={3pt}{0pt}{shadecolor}, sharp corners, frame hidden, breakable]}{\end{tcolorbox}}\fi
+\ifdefined\Shaded\renewenvironment{Shaded}{\begin{tcolorbox}[sharp corners, enhanced, borderline west={3pt}{0pt}{shadecolor}, breakable, frame hidden, interior hidden, boxrule=0pt]}{\end{tcolorbox}}\fi
 \makeatother
 
 \ifLuaTeX
@@ -264,7 +264,7 @@ projections. For instance, package \pkg{RandPro}
 (i.e, where entries are simulated from a standard normal), a sparse
 matrix \citep{ACHLIOPTAS2003JL, LiHastie2006VerySparseRP} or a matrix
 generated using the equal probability distribution with the elements
-\(\{-1,1\}\) to be applied to the predictor matrix before employing one
+\(\{-1,1\}\), to be applied to the predictor matrix before employing one
 of \(k\) nearest neighbors, support vector machine or naive Bayes
 classifier on the projected features. Package \pkg{SPCAvRP}
 \citep{SPCAvRPR} implements sparse principal component analysis, based
@@ -331,11 +331,13 @@ original variables can be introduced through a thresholding parameter,
 which together with the number of models in the ensemble can be chosen
 using a validation set or via cross-validation. The final coefficients
 are then obtained by averaging over the marginal models in the ensemble.
-This algorithm performs sparse projected averaged regression (SPAR) for
-both discrete and continuous data in the GLM framework in a
+This algorithm thus performs sparse projected averaged regression (SPAR)
+for both discrete and continuous data in the GLM framework in a
 computationally efficient way. Different variants of the algorithm have
 been shown to perform well in terms of prediction power on a variety of
-data sets \citep[see][]{Dunson2020TargRandProj}. In particular,
+data sets. \citet{Dunson2020TargRandProj} employ the algorithm with the
+sparse random projection of \citet{ACHLIOPTAS2003JL} combined with
+probabilistic marginal correlation screening. Furthermore,
 \citet{parzer2024glms} show that when paired with a carefully
 constructed data-driven random projection the algorithm performs
 superiorly in terms of predictions and variable ranking in settings
@@ -691,10 +693,10 @@ The two main functions for fitting the SPAR algorithm are:
 
 \begin{verbatim}
 spar(x, y, family = gaussian("identity"), model = NULL, 
-rp = NULL, screencoef = NULL,
-xval = NULL, yval = NULL, nnu = 20, nus = NULL, nummods = c(20),
-measure = c("deviance", "mse", "mae", "class", "1-auc"),
-inds = NULL, RPMs = NULL, ...)
+  rp = NULL, screencoef = NULL,
+  xval = NULL, yval = NULL, nnu = 20, nus = NULL, nummods = c(20),
+  measure = c("deviance", "mse", "mae", "class", "1-auc"),
+  parallel = FALSE, inds = NULL, RPMs = NULL, ...)
 \end{verbatim}
 
 which implements the algorithm in Section~\ref{sec-algo} without
@@ -702,9 +704,10 @@ cross-validation and returns an object of class \class{spar}, and
 
 \begin{verbatim}
 spar.cv(x, y, family = gaussian("identity"), model = NULL, 
-rp = NULL, screencoef = NULL,
-nfolds = 10, nnu = 20, nus = NULL, nummods = c(20),
-measure = c("deviance", "mse", "mae", "class", "1-auc"), ...)
+  rp = NULL, screencoef = NULL,
+  nfolds = 10, nnu = 20, nus = NULL, nummods = c(20),
+  measure = c("deviance", "mse", "mae", "class", "1-auc"), 
+  parallel = FALSE, ...)
 \end{verbatim}
 
 which implements the cross-validated procedure and returns an object of
@@ -756,6 +759,10 @@ The common arguments of these functions are:
   responses and predicted conditional means, for all families),
   \texttt{"class"} (misclassification error) and \texttt{"1-auc"} (one
   minus area under the ROC curve) both just for binomial family.
+\item
+  \texttt{parallel} assuming a parallel backend is loaded and available,
+  a logical indicating whether the function should use it. Defaults to
+  \texttt{FALSE}.
 \end{itemize}
 
 Furthermore, \texttt{spar()} has the specific arguments:
@@ -796,78 +803,15 @@ arguments \texttt{...} (to be saved as attributes) and \texttt{control}
 (a list of controls to be used in the main function for computing the
 screening coefficient).
 
-Consider as an example function \texttt{screen\_marglik()} which
-implements a screening procedure based on the coefficients of univariate
-GLMs:
-
 \begin{verbatim}
-R> screen_marglik
-#> function(..., control = list()) {
-#>     out <- list(name = name,
-#>                 generate_fun = generate_fun,
-#>                 control = control)
-#>     attr <- list2(...)
-#>     attributes(out) <- c(attributes(out), attr)
-#>     if (is.null(attr(out, "type"))) {
-#>       attr(out, "type") <- "prob"
-#>     } else {
-#>       stopifnot(
-#>         "'type' must be either 'prob' or 'fixed'." =
-#>           (attr(out, "type") == "prob" | attr(out, "type") == "fixed")
-#>       )
-#>     }
-#>     if (is.null(attr(out, "reuse_in_rp"))) attr(out, "reuse_in_rp") <- FALSE
-#>     class(out) <- c("screencoef")
-#>     return(out)
-#>   }
-#> <bytecode: 0x119895e78>
-#> <environment: 0x119883040>
+screen_*(..., control = list())
 \end{verbatim}
-
-The function returns a \class{screencoef} object which is a list
-containing three elements: a character \texttt{name}, a function
-\texttt{generate\_fun} returning a \(p\) dimensional vector of the
-screening coefficients and a list of \texttt{control} arguments useful
-in \texttt{generate\_fun}. More details on the construction of such
-objects is
-
-As mentioned above, arguments related to the screening procedure can be
-passed to the \texttt{screen\_*()} function through \texttt{...}, and
-will be saved as attributes of the \class{screencoef} object. More
-specifically, the following attributes are relevant for function
-\texttt{spar()}:
-
-\begin{itemize}
-\item
-  \texttt{nscreen} integer giving the number of variables to be retained
-  after screening; defaults to \(2n\).
-\item
-  \texttt{split\_data\_prop}, double between 0 and 1 which indicates the
-  proportion of the data that should be used for computing the screening
-  coefficient. The remaining data will be used for estimating the
-  marginal models in the SPAR algorithm; defaults to \texttt{NULL}. In
-  this case the whole data will be used for estimating the screening
-  coefficient and the marginal models.
-\item
-  \texttt{type} character -- either \texttt{"prob"} (indicating that
-  probabilistic screening should be employed) or \texttt{"fixed"}
-  (indicating that a fixed set of \texttt{nscreen} variables should be
-  employed across the ensemble); defaults to \texttt{type\ =\ "prob"}.
-\item
-  \texttt{reuse\_in\_rp} logical -- indicates whether the screening
-  coefficient should be reused at a later stage in the construction of
-  the random projection. Defaults to \texttt{FALSE}.
-\end{itemize}
-
-The \texttt{control} argument, on the other hand, is a list containing
-extra parameters to be passed to the main function computing the
-screening coefficients.
 
 The following screening coefficients are implemented in \pkg{spar}:
 
 \begin{itemize}
 \item
-  \texttt{screen\_marglik()} - computes the screening coefficients by
+  \texttt{screen\_marglik()} -- computes the screening coefficients by
   the coefficient of \(x_j\) for \(j =1,\dots,p\) in a univariate GLM
   using the \texttt{stats::glm()} function. \[
   \hat\omega_j=:\text{argmin}_{\beta_j\in \mathbb{R}}\text{min}_{{\beta_0}\in\mathbb{R}}\sum_{i=1}^n -\ell(\beta_0,\beta_j;y_i,x_{ij})
@@ -910,6 +854,34 @@ All implemented \texttt{screen\_*} functions return an object of class
   \texttt{screen\_*}. These controls are arguments which are needed in
   \texttt{generate\_fun()} in order to generate the desired screening
   coefficients.
+\end{itemize}
+
+As mentioned above, arguments related to the screening procedure can be
+passed to the \texttt{screen\_*()} function through \texttt{...}, and
+will be saved as attributes of the \class{screencoef} object. More
+specifically, the following attributes are relevant for function
+\texttt{spar()}:
+
+\begin{itemize}
+\item
+  \texttt{nscreen} integer giving the number of variables to be retained
+  after screening; defaults to \(2n\).
+\item
+  \texttt{split\_data\_prop}, double between 0 and 1 which indicates the
+  proportion of the data that should be used for computing the screening
+  coefficient. The remaining data will be used for estimating the
+  marginal models in the SPAR algorithm; defaults to \texttt{NULL}. In
+  this case the whole data will be used for estimating the screening
+  coefficient and the marginal models.
+\item
+  \texttt{type} character -- either \texttt{"prob"} (indicating that
+  probabilistic screening should be employed) or \texttt{"fixed"}
+  (indicating that a fixed set of \texttt{nscreen} variables should be
+  employed across the ensemble); defaults to \texttt{type\ =\ "prob"}.
+\item
+  \texttt{reuse\_in\_rp} logical -- indicates whether the screening
+  coefficient should be reused at a later stage in the construction of
+  the random projection. Defaults to \texttt{FALSE}.
 \end{itemize}
 
 For illustration purposes, consider the object created by calling
@@ -971,21 +943,25 @@ attribute for the \class{screencoef} object).
 
 For convenience, a constructor function
 \texttt{constructor\_screencoef()} is provided, which can be used to
-create new \texttt{screen\_*} functions.\\
-An example is presented in Section~\ref{sec-extensscrcoef}.
+create new \texttt{screen\_*} functions. An example is presented in
+Section~\ref{sec-extensscrcoef}.
 
 \subsection{Random projections}\label{random-projections}
 
 Similar to the screening procedure, the objects for creating random
 projections are implemented as \proglang{S}3 classes
-\class{randomprojection} and are created by functions
-\texttt{rp\_*(...,\ control\ =\ list())}, which take \texttt{...} and a
-list of controls \texttt{control} as arguments.
+\class{randomprojection} and are created by functions which take
+\texttt{...} and a list of controls \texttt{control} as arguments.
+
+\begin{verbatim}
+rp_*(..., control = list())
+\end{verbatim}
 
 Arguments related to the random projection can be passed through
 \texttt{...}, which will then be saved as attributes of the
 \class{randomprojection} object. More specifically, the following
-attributes are relevant in the SPAR algorithm:
+attributes are relevant in the SPAR algorithm and are present in all
+\class{randomprojection} objects:
 
 \begin{itemize}
 \item
@@ -1202,12 +1178,28 @@ R> spar_res <- spar(example_data$x, example_data$y,
 +                 nummods = c(5, 10, 15, 20, 25, 30))
 R> spar_cv <- spar.cv(example_data$x, example_data$y,
 +                   nummods = c(5, 10, 15, 20, 25, 30))
+R> 
 \end{verbatim}
 
 \begin{verbatim}
 R> spar_res
 #> spar object:
-#> Smallest Validation Measure reached for nummod=30,
+#> Smallest Validation Measure of 3.18e+04 reached for nummod=30,
+#>               nu=1.72e-02 leading to 1002 / 2000 active predictors.
+#>  spar object:
+#> Smallest Validation Measure of 3.11e+04 reached for nummod=30,
+#>               nu=1.72e-02 leading to 1002 / 2000 active predictors.
+#>  spar object:
+#> Smallest Validation Measure of 3.16e+04 reached for nummod=30,
+#>               nu=1.72e-02 leading to 1002 / 2000 active predictors.
+#>  spar object:
+#> Smallest Validation Measure of 3.10e+04 reached for nummod=30,
+#>               nu=1.72e-02 leading to 1002 / 2000 active predictors.
+#>  spar object:
+#> Smallest Validation Measure of 3.08e+04 reached for nummod=30,
+#>               nu=1.72e-02 leading to 1002 / 2000 active predictors.
+#>  spar object:
+#> Smallest Validation Measure of 3.05e+04 reached for nummod=30,
 #>               nu=1.72e-02 leading to 1002 / 2000 active predictors.
 #> Summary of those non-zero coefficients:
 #>     Min.  1st Qu.   Median     Mean  3rd Qu.     Max. 
@@ -1386,6 +1378,30 @@ having validation measure within one standard deviation from the minimum
 The \texttt{plot} methods return objects of class \class{ggplot}
 \citep{ggplotR}.
 
+\subsection{Parallelization}\label{parallelization}
+
+The package supports parallelization in the estimation of the marginal
+marginal models in the ensemble via package \pkg{foreach}
+\citep{pkg:foreach}. This is possible by setting the parameter
+\texttt{parallel} to \texttt{TRUE}, assuming that a parallel backend for
+\pkg{foreach} is registered using the \texttt{registerDoParallel()}
+function of package \pkg{doParallel} \citep{pkg:doParallel}. A minimal
+example is provided below:
+
+\begin{verbatim}
+R> library(doParallel)
+#> Loading required package: foreach
+#> Loading required package: iterators
+#> Loading required package: parallel
+R> cl <- makeCluster(2, type = "FORK")
+R> registerDoParallel(cl)
+R> spar_res_par <- spar(example_data$x, example_data$y, 
++    screencoef = screen_cor(), rp = rp_gaussian(),
++    parallel = TRUE)
+#> Using doParallelSNOW with 2 workers
+R> stopImplicitCluster()
+\end{verbatim}
+
 \section{Extensibility}\label{sec-extensibility}
 
 \subsection{Screening coefficients}\label{sec-extensscrcoef}
@@ -1436,7 +1452,7 @@ R> spar_example <- spar(example_data$x, example_data$y,
 +                     measure = "mse")
 R> spar_example
 #> spar object:
-#> Smallest Validation Measure reached for nummod=20,
+#> Smallest Validation Measure of 1.32e+02 reached for nummod=20,
 #>               nu=1.75e-03 leading to 396 / 2000 active predictors.
 #> Summary of those non-zero coefficients:
 #>       Min.    1st Qu.     Median       Mean    3rd Qu.       Max. 
@@ -1523,8 +1539,8 @@ R> generate_cannings <- function(rp, m, included_vector) {
 +    eta_test <- (cbind(1, tcrossprod(xtest, RM)) %*% coefs)
 +    pred <- rp$control$family$linkinv(as.vector(eta_test))
 +    out_perf <-  ifelse(rp$control$family$family == "binomial",
-+                   mean(((pred > 0.5) + 0) != ytest), 
-+                   mean((pred - ytest)^2))
++                        mean(((pred > 0.5) + 0) != ytest), 
++                        mean((pred - ytest)^2))
 +    if (out_perf < best_val) {
 +      best_val <- out_perf
 +      best_RM <- RM
@@ -1557,7 +1573,8 @@ function \texttt{update\_rpm\_w\_data()}.
 Putting it all together, we get:
 
 \begin{verbatim}
-R> rp_cannings <- constructor_randomprojection("rp_cannings",
+R> rp_cannings <- constructor_randomprojection(
++  "rp_cannings",
 +  generate_fun = generate_cannings,
 +  update_data_fun = update_data_cannings
 +)
@@ -1615,6 +1632,83 @@ R> spar_example_2$val_res[which.min(spar_example_2$val_res$Meas),]
 #>   nnu nu nummod numAct Meas
 #> 1   1  0     50   2000 0.17
 \end{verbatim}
+
+\subsection{Marginal models}\label{marginal-models-1}
+
+Finally, we illustrate how to implement a new marginal model in
+\pkg{spar}. We consider estimating a robust GLM as a marginal model
+using the package \pkg{robustbase} \citep{pkg:robustbase}.
+
+We start by defining the \texttt{model\_fun()} function:
+
+\begin{verbatim}
+R> model_glmrob <- function(y, z, object) {
++  ## y - vector of n responses
++  ## z - matrix with n rows
++  glmrob_res <- do.call(function(...) robustbase::glmrob(y ~ z, ...),
++                       object$control)
++    intercept <- coef(glmrob_res)[1]
++    gammas <- coef(glmrob_res)[-1]
++  list(gammas = gammas, intercept = intercept)
++}
+\end{verbatim}
+
+We then construct a \texttt{spar\_glmrob()} function, which builds the
+\class{sparmodel} object. We can do this easily by the available
+constructor function:
+
+\begin{verbatim}
+R> spar_glmrob <- constructor_sparmodel(name = "glmrob", model_fun = model_glmrob)
+\end{verbatim}
+
+We can now the SPAR algorithm with robust GLMs are marginal models and
+compare it to a version with marginal GLMs. For illustration purposes we
+contaminate 10\% of the \texttt{example\_data} with outliers both in the
+predictors and response variable. We find the threshold \(\nu\) by
+choosing the value which delivers the lowest mean absolute error.
+
+\begin{verbatim}
+R> tau <- 0.1
+R> x <- example_data$x
+R> y <- example_data$y
+R> set.seed(123)
+R> id_outliers_x <- sample(seq_len(ncol(x)*nrow(x)), 
++                      tau * ncol(x)*nrow(x))
+R> x[id_outliers_x] <- x[id_outliers_x] + 20
+R> id_outliers_y <- sample(seq_len(length(y)), tau * length(y))
+R> y[id_outliers_y] <- y[id_outliers_y] - 20
+R> set.seed(123)
+R> spar_rob_res <- spar(x, y,
++                     model = spar_glmrob(),
++                     rp = rp_gaussian(),
++                     screencoef = screen_cor(),
++                     nummods = 50, 
++                     measure = "mae")
+R> set.seed(123)
+R> spar_res <- spar(x, y,
++                 model = spar_glm(),
++                 rp = rp_gaussian(),
++                 screencoef = screen_cor(),
++                 nummods = 50, 
++                 measure="mae")
+R> spar_rob_res
+#> spar object:
+#> Smallest Validation Measure of 1.15e+01 reached for nummod=50,
+#>               nu=1.99e-03 leading to 1919 / 2000 active predictors.
+#> Summary of those non-zero coefficients:
+#>      Min.   1st Qu.    Median      Mean   3rd Qu.      Max. 
+#> -0.046434 -0.001595  0.005086  0.008388  0.015549  0.109824
+R> spar_res
+#> spar object:
+#> Smallest Validation Measure of 1.15e+01 reached for nummod=50,
+#>               nu=1.99e-03 leading to 1919 / 2000 active predictors.
+#> Summary of those non-zero coefficients:
+#>      Min.   1st Qu.    Median      Mean   3rd Qu.      Max. 
+#> -0.046434 -0.001595  0.005086  0.008388  0.015549  0.109824
+\end{verbatim}
+
+We observe that the attained \texttt{mae} is indeed lower for the robust
+version.
 
 \section{Illustrations}\label{sec-illustrations}
 
@@ -1684,10 +1778,10 @@ R> library("spar")
 R> set.seed(123)
 R> control_glmnet <- list(lambda.min.ratio = 0.001)
 R> spar_faces <- spar.cv(xtrain, ytrain,
-+    model = spar_glm(),
-+    screencoef = screen_glmnet(control = control_glmnet, reuse_in_rp = TRUE),
-+    rp = rp_cw(data = TRUE),
-+    nummods = c(5, 10, 20, 50), measure = "mse")
++                      model = spar_glm(),
++                      screencoef = screen_glmnet(control = control_glmnet, reuse_in_rp = TRUE),
++                      rp = rp_cw(data = TRUE),
++                      nummods = c(5, 10, 20, 50), measure = "mse")
 \end{verbatim}
 
 The \texttt{print} method returns:
@@ -1795,10 +1889,10 @@ correlation screening.
 
 \begin{verbatim}
 R> tarp_faces <-  spar.cv(xtrain, ytrain,
-+    model = spar_glm(),
-+    screencoef = screen_cor(),
-+    rp = rp_sparse(psi = 1/3),
-+    nummods = c(5, 10, 20, 50), measure = "mse")
++                       model = spar_glm(),
++                       screencoef = screen_cor(),
++                       rp = rp_sparse(psi = 1/3),
++                       nummods = c(5, 10, 20, 50), measure = "mse")
 R> ynew_tarp <- predict(tarp_faces, xnew = xtest,
 +                     coef = coef(tarp_faces, opt_par = "1se"))
 R> c("SPAR" = mean((ytest-ynew)^2), 
@@ -1817,8 +1911,8 @@ contour and the hairline are most informative for the prediction.
 
 \begin{figure}[t!]
 \centering
-\includegraphics[width=0.4\textwidth]{Figures/faces_obs_415.pdf}
-\includegraphics[width=0.4\textwidth]{Figures/faces_plot_predictions.pdf}
+\includegraphics[width=0.45\textwidth]{Figures/faces_obs_415.pdf}
+\includegraphics[width=0.45\textwidth]{Figures/faces_plot_predictions.pdf}
 \caption{Left: Image corresponding to one observation in the \emph{Isomap faces} data set. Right: The effect of each pixel $\hat\beta^\text{1se}_j x^\text{new}_{i,j}$ in predicting the face orientation in left panel. \label{fig:faces_predictions}}
 \end{figure}
 

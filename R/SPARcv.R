@@ -76,6 +76,9 @@ spar.cv <- function(x, y,
                     nus = NULL,
                     nummods = c(20),
                     measure = c("deviance","mse","mae","class","1-auc"),
+                    parallel = FALSE,
+                    seed = NULL,
+                    set.seed.iteration = FALSE,
                     ...
 ) {
   # Set up and checks ----
@@ -106,7 +109,10 @@ spar.cv <- function(x, y,
                         nnu = nnu, nus = nus,
                         nummods = nummods,
                         measure = measure,
-                        inds = NULL, RPMs = NULL)
+                        inds = NULL, RPMs = NULL,
+                        parallel = parallel,
+                        seed = seed,
+                        set.seed.iteration = set.seed.iteration)
   # SPARres <- spar(x, y, family = family, model = model,
   #                 rp = rp,
   #                 screencoef = screencoef,
@@ -118,16 +124,19 @@ spar.cv <- function(x, y,
   folds <- sample(cut(seq_len(n), breaks = nfolds, labels=FALSE))
   for (k in seq_len(nfolds)) {
     fold_id <- (folds == k)
-    foldSPARres <- spar_algorithm(x[!fold_id,SPARres$xscale>0],y[!fold_id],
-                        family = family, model = model,
-                        xval = x[fold_id,SPARres$xscale>0],
-                        yval = y[fold_id],
-                        rp = rp, screencoef = screencoef,
-                        nus = SPARres$nus,
-                        inds = SPARres$inds,
-                        RPMs = SPARres$RPMs,
-                        nummods = nummods,
-                        measure = measure)
+    foldSPARres <- spar_algorithm(
+      x = x[!fold_id,SPARres$xscale>0],y = y[!fold_id],
+      family = family, model = model,
+      xval = x[fold_id,SPARres$xscale>0],
+      yval = y[fold_id],
+      rp = rp, screencoef = screencoef,
+      nus = SPARres$nus,
+      inds = SPARres$inds,
+      RPMs = SPARres$RPMs,
+      nummods = nummods,
+      measure = measure,
+      parallel = parallel,
+      set.seed.iteration = FALSE)
     val_res <- rbind(val_res,foldSPARres$val_res)
   }
 
@@ -147,6 +156,7 @@ spar.cv <- function(x, y,
               family = family,
               measure = measure,
               rp = rp, screencoef = screencoef,
+              model = model,
               ycenter = SPARres$ycenter, yscale = SPARres$yscale,
               xcenter = SPARres$xcenter, xscale = SPARres$xscale)
 

@@ -7,7 +7,7 @@
 constructor_randomprojection(
   name,
   generate_fun,
-  update_data_fun = NULL,
+  update_rp_fun = NULL,
   update_rpm_w_data = NULL,
   control = list()
 )
@@ -18,11 +18,12 @@ constructor_randomprojection(
 \item{generate_fun}{function for generating the random projection matrix. This
 function should have with arguments \code{rp}, which is a randomprojection
 object, \code{m}, the target dimension and a vector of indexes
-\code{included_vector} which shows the column index of the original variables in the
+\code{included_vector}, \code{x} matrix of predictors and \code{y} matrix of predictors.
+Vector \code{included_vector} shows the column index of the original variables in the
 \code{x} matrix to be projected using the random projection. This is needed
-due to the fact that screening can be employed pre-projection.}
+due to the fact that screening is employed pre-projection.}
 
-\item{update_data_fun}{function for updating the randomprojection object with
+\item{update_rp_fun}{function for updating the randomprojection object with
 information from the data. This
 function should have arguments \code{rp}, which is a randomprojection
 object and \code{x} (the matrix of predictors)

@@ -1,3 +1,41 @@
+#' Constructor function for building sparmodel objects
+#'
+#' Creates an object of class "\code{sparmodel}" using arguments passed by user.
+#' @param name character
+#' @param model_fun function for estimating the marginal models which returns the
+#     intercept and the vector of coefficients. This
+#'    function should have arguments  and   \code{y} (vector of responses -- standardized
+#'    for Gaussian family), \code{z} (the matrix of projected predictors) and a
+#'    "\code{sparmodel}" \code{object}.
+#' @return a function which in turn creates a function which in turn creates an
+#'    object of class "\code{sparmodel}".
+#' @description
+#' The created function will return a object of class "\code{sparmodel}" which
+#' constitutes of a list.
+#' @export
+constructor_sparmodel <- function(name, model_fun, update_sparmodel = NULL) {
+  ## Checks
+  args_generate_fun <- formals(model_fun)
+  stopifnot("Function model_fun should contain three arguments: y, z and an object
+            of class \"sparmodel\"." =
+              length(args_generate_fun) == 3)
+  stopifnot("Function model_fun should contain argument 'y', the vector of responses." =
+              "y" %in% names(args_generate_fun))
+  stopifnot("Function model_fun should contain argument 'z', the matrix of reduced predictors." =
+              "z" %in% names(args_generate_fun))
+  ## Function to return
+  function(..., control = list()) {
+    out <- list(name = name,
+                model_fun = model_fun,
+                update_sparmodel = update_sparmodel,
+                control = control)
+    attr <- list2(...)
+    attributes(out) <- c(attributes(out), attr)
+    class(out) <- c("sparmodel")
+    return(out)
+  }
+}
+
 #' Model object for estimating penalized glms in marginal models in the ensemble
 #'
 #' Creates an object class "\code{sparmodel}" using arguments passed by user.
@@ -55,7 +93,7 @@ update_sparmodel_glmnet <- function(object) {
       fit_family <- family
     }
   }
-  attr(object, "family") <- family
+  attr(object, "family") <- fit_family
   object
 }
 

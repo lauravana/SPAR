@@ -37,6 +37,7 @@
 #'         \code{"class"} (misclassification error) and
 #'         \code{"1-auc"} (one minus area under the ROC curve) both just for
 #'         binomial family.
+#' @param parallel assuming a parallel backend is loaded and available, a logical indicating whether the function should use it. Defaults to FALSE.
 # #' @param type.rpm  type of random projection matrix to be employed;
 # #'        one of \code{"cwdatadriven"},
 # #'        \code{"cw"} \insertCite{Clarkson2013LowRankApprox}{spar},
@@ -51,6 +52,9 @@
 #' @param RPMs optional list of projection matrices used in each
 #' marginal model of length \code{max(nummods)}, diagonal elements will be
 #'  overwritten with a coefficient only depending on the given \code{x} and \code{y}.
+#' @param seed integer seed to be set at the beginning of the SPAR algorithm. Default to NULL, in which case no seed is set.
+#' @param set.seed.iteration a boolean indicating whether a different seed should be set in each marginal model \code{i}.
+#'   This will be set to  \code{seed + i}.
 #' @param ... further arguments mainly to ensure back-compatibility
 #' @returns object of class \code{"spar"} with elements
 #' \itemize{
@@ -74,6 +78,10 @@
 #'  \item \code{rp} an object of class "\code{randomprojection}"
 #'  \item \code{screencoef} an object of class "\code{screeningcoef}"
 #' }
+#' If a parallel backend is registered and \code{parallel = TRUE},
+#' the \link[foreach]{foreach} function
+#' is used to estimate the marginal models in parallel.
+#'
 #' @references{
 #'   \insertRef{parzer2024lm}{spar}
 #'
@@ -103,6 +111,7 @@
 #' @importFrom rlang list2
 #' @importFrom glmnet glmnet
 #' @importFrom ROCR prediction performance
+#' @importFrom foreach foreach getDoParRegistered %do% %dopar%
 #'
 spar <- function(x, y,
                  family = gaussian("identity"),
@@ -113,8 +122,10 @@ spar <- function(x, y,
                  nnu = 20, nus = NULL,
                  nummods = c(20),
                  measure = c("deviance","mse","mae","class","1-auc"),
+                 parallel = FALSE,
                  inds = NULL, RPMs = NULL,
-                 parallel = c("no", "multicore", "snow"),
+                 seed = NULL,
+                 set.seed.iteration = FALSE,
                  ...) {
 
   # Set up and checks ----
@@ -136,7 +147,9 @@ spar <- function(x, y,
                         nnu = nnu, nus = nus,
                         nummods = nummods,
                         measure = measure,
-                        inds = inds, RPMs = RPMs)
+                        inds = inds, RPMs = RPMs,
+                        parallel = parallel,
+                        seed = seed, set.seed.iteration = set.seed.iteration)
   return(res)
 
 }
@@ -147,7 +160,8 @@ spar_algorithm <- function(x, y,
                            nnu, nus,
                            nummods, measure,
                            inds = NULL, RPMs = NULL,
-                           parallel){
+                           parallel = FALSE,
+                           seed = NULL, set.seed.iteration = FALSE){
   # Start SPAR algorithm
   p <- ncol(x)
   n <- nrow(x)
@@ -187,8 +201,9 @@ spar_algorithm <- function(x, y,
     model <- model$update_sparmodel(model)
   }
   # Setup screening ----
+  family_str <- paste0(family$family, "(", family$link, ")")
   if (is.null(attr(screencoef, "family"))) {
-    attr(screencoef, "family") <- family
+    attr(screencoef, "family_string") <- family_str
   }
   if (!is.null(attr(screencoef, "split_data")) &
       is.null(attr(screencoef, "split_data_prop"))) {
@@ -217,9 +232,10 @@ spar_algorithm <- function(x, y,
 
   # Perform screening ----
   if (nscreen < p) {
-    scr_coef <- get_screencoef(object = screencoef,
-                               x = z[scr_inds,],
-                               y = yz[scr_inds, ])
+    scr_coef <- screencoef$generate_fun(
+      object = screencoef,
+      x = z[scr_inds,],
+      y = yz[scr_inds, ])
     attr(screencoef, "importance") <- scr_coef
 
     inc_probs <- abs(scr_coef)
@@ -231,21 +247,22 @@ spar_algorithm <- function(x, y,
     message("nscreen >= p. No screening performed.")
   }
 
-  ## Update RP with data only at the beginning if possible, not in each RP! ----
-  if (is.null(attr(rp, "family"))) {
-    attr(rp, "family") <- family
-  }
-  if (!is.null(rp$update_data_fun)) {
-    rp <- rp$update_data_fun(rp = rp,
-                             x = z[scr_inds,],
-                             y = yz[scr_inds, ],
-                             screencoef = screencoef)
-  }
+  # Update RP ----
+  all_args <- list(x = x, y = y, family = family,
+                   model = model, rp = rp,
+                   screencoef = screencoef,
+                   xval = xval, yval = yval,
+                   nnu = nnu, nus=nus,
+                   nummods=nummods, measure=measure,
+                   inds = inds, RPMs = RPMs,
+                   parallel = parallel,
+                   seed = seed,
+                   set.seed.iteration = set.seed.iteration)
+  rp <- do.call(rp$update_rp_fun, all_args)
 
   max_num_mod <- max(nummods)
-  intercepts <- numeric(max_num_mod)
-  betas_std <- Matrix(data=c(0),actual_p,max_num_mod,sparse = TRUE)
 
+  if (!is.null(seed)) set.seed(seed)
   drawRPMs <- FALSE
   if (is.null(RPMs)) {
     RPMs <- vector("list", length = max_num_mod)
@@ -261,8 +278,11 @@ spar_algorithm <- function(x, y,
   }
 
   # SPAR algorithm  ----
-  for (i in seq_len(max_num_mod)) {
+  marginal_model_function <- function(i) {
+    ## Function for screening, drawing the RP and estimating one model in ensemble
     ## Screening step  ----
+    if (set.seed.iteration) set.seed(seed + i)
+    out <- list()
     if (drawinds) {
       if (nscreen < p) {
         if (attr(screencoef, "type") == "fixed") {
@@ -274,7 +294,7 @@ spar_algorithm <- function(x, y,
       } else {
         ind_use <- seq_len(actual_p)
       }
-      inds[[i]] <- ind_use
+      out$inds <- ind_use
     } else {
       ind_use <- inds[[i]]
     }
@@ -286,11 +306,12 @@ spar_algorithm <- function(x, y,
       if (p_use < m) {
         m <- p_use
         RPM <- Matrix::Matrix(diag(1, m),sparse=TRUE)
-        RPMs[[i]] <- RPM
       } else {
-        RPM    <- get_rp(rp, m = m, included_vector = ind_use)
-        RPMs[[i]] <- RPM
+        RPM    <- rp$generate_fun(rp, m = m,
+                                  included_vector = ind_use,
+                                  x = x, y = y)
       }
+      out$RPMs <- RPM
     } else {
       RPM <- RPMs[[i]]
       if (!is.null(rp$update_rpm_w_data)) {
@@ -302,27 +323,39 @@ spar_algorithm <- function(x, y,
     ## Marginal model ----
     znew <- Matrix::tcrossprod(z[mar_inds, ind_use], RPM)
 
-    # if (family$family=="gaussian" & family$link=="identity") {
-    #   mar_coef <- tryCatch(solve(crossprod(znew),
-    #                              crossprod(znew,yz[mar_inds])),
-    #                        error=function(error_message) {
-    #                          return(solve(crossprod(znew)+0.01*diag(ncol(znew)),
-    #                                       crossprod(znew,yz[mar_inds])))
-    #                        })
-    #   intercepts[i] <- 0
-    #   betas_std[ind_use,i] <- Matrix::crossprod(RPM,mar_coef)
-    # } else {
-    #   glmnet_res <- glmnet(znew,y[mar_inds],
-    #                        family = fit_family, alpha=0)
-    #   mar_coef <- coef(glmnet_res, s = min(glmnet_res$lambda))
-    #   intercepts[i] <- mar_coef[1]
-    #   betas_std[ind_use,i] <- crossprod(RPM,mar_coef[-1])
-    # }
     res <- model$model_fun(yz[mar_inds], znew, object = model)
-    intercepts[i] <- res$intercept
-    betas_std[ind_use,i] <- crossprod(RPM, res$gammas)
-
+    out$intercepts <- res$intercept
+    out$betas_std_m <-  as(numeric(actual_p), "sparseMatrix")
+    out$betas_std_m[ind_use] <- crossprod(RPM, res$gammas)
+    out
   }
+
+  if (parallel) {
+    # honor registration made by user, and only create and register
+    # our own cluster object once
+    if (!getDoParRegistered()) {
+      message('Warning: No doPar backend. Executing SPAR algorithm sequentially.
+               For using parallelization, please register backend and rerun.')
+      `%d%` <- `%do%`
+    } else {
+      message('Using ', getDoParName(), ' with ',
+              getDoParWorkers(), ' workers')
+      `%d%` <- `%dopar%`
+    }
+  } else {
+    # message('Executing SPAR algorithm sequentially.')
+    `%d%` <- `%do%`
+  }
+  res_all <- foreach(i = seq_len(max_num_mod),
+                     .verbose = FALSE,
+                     .packages = "spar",
+                     .errorhandling = "stop") %d%
+    marginal_model_function(i)
+
+  if (drawRPMs) RPMs <- lapply(res_all, "[[", "RPMs")
+  if (drawinds) inds <- lapply(res_all, "[[", "inds")
+  intercepts <- sapply(res_all, "[[", "intercepts")
+  betas_std <- Reduce("cbind2", lapply(res_all, "[[", "betas_std_m"))
 
   if (is.null(nus)) {
     if (nnu>1) {
@@ -395,7 +428,8 @@ spar_algorithm <- function(x, y,
               family = family_str,
               measure = measure,
               rp = rp,
-              screencoef = screencoef
+              screencoef = screencoef,
+              model = model
   )
 
   attr(res,"class") <- "spar"
@@ -694,8 +728,10 @@ plot.spar <- function(x,
 print.spar <- function(x, ...) {
   mycoef <- coef(x)
   beta <- mycoef$beta
-  cat(sprintf("spar object:\nSmallest Validation Measure reached for nummod=%d,
+  Meas <- x$val_res$Meas[mycoef$nu == x$val_res$nu]
+  cat(sprintf("spar object:\nSmallest Validation Measure of %s reached for nummod=%d,
               nu=%s leading to %d / %d active predictors.\n",
+              formatC(Meas,digits = 2,format = "e"),
               mycoef$nummod, formatC(mycoef$nu,digits = 2,format = "e"),
               sum(beta!=0),length(beta)))
   cat("Summary of those non-zero coefficients:\n")

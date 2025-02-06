@@ -12,7 +12,7 @@ projection matrix. The possible argument is \code{psi} in (0,1] which determines
 the level of sparsity in the matrix.}
 
 \item{control}{list of arguments to be used in functions
-\code{generate_fun}, \code{update_data_fun}, \code{update_rpm_w_data}}
+\code{generate_fun}, \code{update_rp_fun}, \code{update_rpm_w_data}}
 }
 \value{
 object of class "\code{randomprojection}"

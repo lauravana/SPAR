@@ -50,10 +50,10 @@ test_that("Returned coef and preds are correct for fixed screening and projectio
   sparcoef <- coef(spar_res)
   pred     <- predict(spar_res,xnew=xnew)
 
-  expect_equal(sparcoef$nu,0.002432288,tolerance = 1e-6)
+  expect_equal(sparcoef$nu,0.002285171,tolerance = 1e-6)
   expect_equal(sparcoef$beta[53],0)
-  expect_equal(sparcoef$beta[1],0.1355489, tolerance = 1e-6)
-  expect_equal(pred[1],20.62153,tolerance = 1e-5)
+  expect_equal(sparcoef$beta[1],0.125971, tolerance = 1e-6)
+  expect_equal(pred[1],20.44922,tolerance = 1e-5)
 })
 
 test_that("Returned coef and preds are correct for fixed screening and projections for binomial(logit)", {
@@ -80,10 +80,10 @@ test_that("Returned coef and preds are correct for fixed screening and projectio
   sparcoef <- coef(spar_res)
   pred <- predict(spar_res,xnew=xnew)
 
-  expect_equal(sparcoef$nu,0.009443021 ,tolerance = 1e-6)
+  expect_equal(sparcoef$nu,0.009850679 ,tolerance = 1e-6)
   expect_equal(sparcoef$beta[11],0)
-  expect_equal(sparcoef$beta[1],0.05076765,tolerance = 1e-6)
-  expect_equal(pred[1],0.9738588,tolerance = 1e-5)
+  expect_equal(sparcoef$beta[1],0.04795905,tolerance = 1e-6)
+  expect_equal(pred[1],0.9749038,tolerance = 1e-5)
 })
 
 test_that("Columns with zero sd get ceofficient 0", {
@@ -123,6 +123,30 @@ test_that("Data splitting delivers different results", {
   expect_true(any(sparcoef$beta[c(13,38,43)] != sparcoef2$beta[c(13,38,43)]))
   expect_equal(sparcoef$beta[c(13,38,43)], sparcoef3$beta[c(13,38,43)])
 })
+
+test_that("Test the gaussian rp", {
+  x <- example_data$x
+  y <- example_data$y
+  set.seed(123)
+  spar_g_res <- spar(x,y, rp = rp_gaussian())
+  expect_equal(round(spar_g_res$val_res$Meas[1], 2), 17873.92)
+})
+
+test_that("Get same results with parallel option", {
+  x <- example_data$x
+  y <- example_data$y
+  set.seed(123)
+  spar_res <- spar(x, y, screencoef = screen_cor(), rp = rp_gaussian(),
+                   seed = 123, set.seed.iteration = TRUE)
+  library(doParallel)
+  cl <- makeCluster(2, type = "FORK")
+  registerDoParallel(cl)
+  spar_res2 <- spar(x, y, screencoef = screen_cor(), rp = rp_gaussian(),
+                    parallel = TRUE, set.seed.iteration = TRUE, seed = 123)
+  stopImplicitCluster()
+  expect_equal(spar_res$betas[1:10],  spar_res2$betas[1:10])
+})
+
 
 # Tests expecting errors
 
@@ -184,5 +208,3 @@ test_that("Get errors for classification validation measure for non-binomial fam
   y <- example_data$y
   expect_error(spar(x,y,measure = "1-auc"))
 })
-
-

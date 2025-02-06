@@ -45,15 +45,6 @@ constructor_screencoef <- function(name, generate_fun) {
     return(out)
   }
 }
-#' Function which generates the screening coefficients
-#' @param y vector of responses
-#' @param x matrix of predictors
-#' @param object an object of class screencoef
-#' @keywords internal
-get_screencoef <- function(y, x, object) {
-  coef <- object$generate_fun(y, x, object)
-  coef
-}
 
 #'
 #' Generate screening coefficient based  on marginal likelihood in univariate GLMs
@@ -63,12 +54,13 @@ get_screencoef <- function(y, x, object) {
 #' @return vector of screening coefficients of length p
 #' @keywords internal
 generate_scrcoef_marglik <- function(y, x, object) {
-  if (is.null(object$control$family)) {
-    object$control$family <- attr(object, "family")
+  control <- object$control
+  if (is.null(control$family)) {
+    control$family <- eval(parse(text=attr(object, "family_string")))
   }
   coefs <- apply(x, 2, function(xj){
     glm_res <- do.call(function(...) glm(y ~ xj,  ...),
-                       object$control)
+                       control)
     glm_res$coefficients[2]
   })
   coefs
@@ -154,7 +146,7 @@ generate_scrcoef_glmnet <- function(y, x, object) {
     object$control[names(object$control)  %in% names(formals(glmnet))]
 
   if (is.null(control_glmnet$family)) {
-    control_glmnet$family <- attr(object, "family")
+    control_glmnet$family <-  eval(parse(text=attr(object, "family_string")))
   }
   family <- control_glmnet$family
 

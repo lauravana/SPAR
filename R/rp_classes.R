@@ -1,3 +1,14 @@
+#' @keywords internal
+update_rp <- function(...) {
+  args <- list2(...)
+  if (is.null(attr(args$rp, "family"))) {
+    family_string <- paste0(args$family$family, "(", args$family$link, ")")
+    attr(args$rp, "family_string") <- args$family
+  }
+  args$rp
+}
+
+
 #' Constructor function for building randomprojection objects
 #'
 #' Creates an object class randomprojection using arguments passed by user.
@@ -5,10 +16,11 @@
 #' @param generate_fun function for generating the random projection matrix. This
 #' function should have with arguments \code{rp}, which is a randomprojection
 #' object, \code{m}, the target dimension and a vector of indexes
-#' \code{included_vector} which shows the column index of the original variables in the
+#' \code{included_vector}, \code{x} matrix of predictors and \code{y} matrix of predictors.
+#' Vector \code{included_vector} shows the column index of the original variables in the
 #' \code{x} matrix to be projected using the random projection. This is needed
-#' due to the fact that screening can be employed pre-projection.
-#' @param update_data_fun function for updating the randomprojection object with
+#' due to the fact that screening is employed pre-projection.
+#' @param update_rp_fun function for updating the randomprojection object with
 #' information from the data. This
 #' function should have arguments \code{rp}, which is a randomprojection
 #' object and `x` (the matrix of predictors)
@@ -24,14 +36,18 @@
 #' @return a function which in turn creates an object of class randomprojection
 #'
 #' @export
-constructor_randomprojection <- function(name, generate_fun,
-                                         update_data_fun = NULL,
+constructor_randomprojection <- function(name,
+                                         generate_fun,
+                                         update_rp_fun = NULL,
                                          update_rpm_w_data = NULL,
                                          control = list()) {
   ## Checks
-  stopifnot(names(formals(generate_fun)) %in% c("rp", "m", "included_vector"))
-  if (!is.null(update_data_fun)) {
-    stopifnot("Function update_data_fun should have arguments rp, x, y, screencoef."=names(formals(update_data_fun)) %in% c("rp", "x", "y", "screencoef"))
+  stopifnot("Function generate_fun needs arguments rp, m, included_vector, x, y."=
+              names(formals(generate_fun)) %in% c("rp", "m", "included_vector", "x", "y"))
+  if (!is.null(update_rp_fun)) {
+    stopifnot("Function update_rp_fun should have as argument .... All arguments of spar are passed through ..."=names(formals(update_rp_fun)) %in% c("..."))
+  } else {
+    update_rp_fun <- update_rp
   }
   if (!is.null(update_rpm_w_data)) {
     stopifnot(
@@ -41,13 +57,13 @@ constructor_randomprojection <- function(name, generate_fun,
   function(..., control = list()) {
     out <- list(name = name,
                 generate_fun = generate_fun,
-                update_data_fun = update_data_fun,
+                update_rp_fun = update_rp_fun,
                 update_rpm_w_data = update_rpm_w_data,
                 control = control)
     attr <- list2(...)
     attributes(out) <- c(attributes(out), attr)
     if (is.null(attr(out, "data"))) {
-      attr(out, "data") <- ifelse(is.null(out$update_data_fun),
+      attr(out, "data") <- ifelse(is.null(out$update_rp_fun),
                                   FALSE, TRUE)
     }
     class(out) <- c("randomprojection")
@@ -55,17 +71,6 @@ constructor_randomprojection <- function(name, generate_fun,
   }
 }
 
-#' Function which works on all random projection objects
-#' @param rp an object of class randomprojection
-#' @param m integer goal dimension of the projection
-#' @param included_vector a vector containing column index of the original variables in the
-#' \code{x} matrix to be projected using the random projection
-#'
-#' @keywords internal
-get_rp <- function(rp, m, included_vector) {
-  RM <- rp$generate_fun(rp, m, included_vector)
-  return(RM)
-}
 
 #'
 #' Gaussian random projection matrix
@@ -75,13 +80,19 @@ get_rp <- function(rp, m, included_vector) {
 #' @param included_vector integer vector of column indices for the variables to be
 #' included in the random projection. These indices are produced in the
 #' screening step of the SPAR algorithm.
+#' @param x matrix of predictors
+#' @param y vector of response variable
 #' @return matrix with m rows and
 #'  \code{length(included_vector)} columns sampled from the normal distribution.
 #' @keywords internal
-generate_gaussian <- function(rp, m, included_vector) {
+generate_gaussian <- function(rp, m, included_vector, x = NULL, y = NULL) {
   p <- length(included_vector)
-  control_rnorm <-
-    rp$control[names(rp$control)  %in% names(formals(rnorm))]
+  control_rnorm <-c(
+    rp$control[names(rp$control) %in% names(formals(rnorm))],
+    attributes(rp)[names(attributes(rp)) %in% names(formals(rnorm))])
+  # remove duplicates
+  control_rnorm <-  control_rnorm[!duplicated(names(control_rnorm))]
+
   vals <- do.call(function(...)
     rnorm(m * p, ...), control_rnorm)
   RM <- matrix(vals, nrow = m, ncol = p)
@@ -92,9 +103,9 @@ generate_gaussian <- function(rp, m, included_vector) {
 #' @param ... includes arguments which can be passed as attributes to the random
 #' projection matrix
 #' @param control list of arguments to be used in functions
-#' \code{generate_fun}, \code{update_data_fun}, \code{update_rpm_w_data}
+#' \code{generate_fun}, \code{update_rp_fun}, \code{update_rpm_w_data}
 #' @return object of class "\code{randomprojection}" with is a list with elements name,
-#' generate_fun, update_data_fun, control
+#' generate_fun, update_rp_fun, control
 #' @description
 #' The entries of the matrix will be generated from
 #' a normal distribution (mean 0 and standard deviation 1 by default).
@@ -114,10 +125,12 @@ rp_gaussian <- constructor_randomprojection(
 #' @param included_vector integer vector of column indices for the variables to be
 #' included in the random projection. These indices are produced in the
 #' screening step of the SPAR algorithm.
+#' @param x matrix of predictors
+#' @param y vector of response variable
 #' @return (possibly sparse) matrix with m rows and
 #'  \code{length(included_vector)} columns.
 #' @keywords internal
-generate_sparse <- function(rp, m, included_vector) {
+generate_sparse <- function(rp, m, included_vector, x = NULL, y = NULL) {
   p <- length(included_vector)
   psi <- attr(rp, "psi")
   if (is.null(psi)) psi <- 1
@@ -138,7 +151,7 @@ generate_sparse <- function(rp, m, included_vector) {
 #' projection matrix. The possible argument is \code{psi} in (0,1] which determines
 #' the level of sparsity in the matrix.
 #' @param control list of arguments to be used in functions
-#' \code{generate_fun}, \code{update_data_fun}, \code{update_rpm_w_data}
+#' \code{generate_fun}, \code{update_rp_fun}, \code{update_rpm_w_data}
 #' @return object of class "\code{randomprojection}"
 #' @description
 #' The sparse matrix used in \insertCite{ACHLIOPTAS2003JL}{spar} with entries equal to
@@ -161,10 +174,12 @@ rp_sparse <- constructor_randomprojection(
 #' @param included_vector integer vector of column indices for the variables to be
 #' included in the random projection. These indices are produced in the
 #' screening step of the SPAR algorithm.
+#' @param x matrix of predictors
+#' @param y vector of response variable
 #' @return (possibly sparse) matrix with m rows and
 #'  \code{length(included_vector)} columns.
 #' @keywords internal
-generate_cw <- function(rp, m, included_vector) {
+generate_cw <- function(rp, m, included_vector, x = NULL, y = NULL) {
   p <- length(included_vector)
   use_data <- attr(rp, "data")
   if (!use_data) {
@@ -191,54 +206,68 @@ generate_cw <- function(rp, m, included_vector) {
   return(RM)
 }
 
-update_data_cw <- function(rp, x, y, screencoef) {
-  n <- NROW(x)
-  p <- NCOL(x)
-  # dots <- list(...)
-  if (attr(screencoef, "reuse_in_rp")) {
-    scr_coef <- attr(screencoef, "importance")
-    inc_probs <- attr(screencoef, "inc_prob")
+update_rp_cw <- function(...) {
+  args <- list2(...)
+  n <- NROW(args$x)
+  p <- NCOL(args$x)
+  if (attr(args$screencoef, "reuse_in_rp")) {
+    scr_coef <- attr(args$screencoef, "importance")
+    inc_probs <- attr(args$screencoef, "inc_prob")
   } else {
-    if (is.null(rp$control$family)) {
-      rp$control$family <- attr(rp, "family")
+    if (is.null(args$rp$control$family)) {
+      family_string <- paste0(args$family$family, "(", args$family$link, ")")
+      args$rp$control$family_string <- family_string
     }
-    family <- rp$control$family
-
+    family <- args$family
+    if (family$family=="gaussian" & family$link=="identity") {
+      fit_family <- "gaussian"
+    } else {
+      if (family$family=="binomial" & family$link=="logit") {
+        fit_family <- "binomial"
+      } else if (family$family=="poisson" & family$link=="log") {
+        fit_family <- "poisson"
+      } else {
+        fit_family <- family
+      }
+    }
     if (family$family=="gaussian") {
       dev.ratio_cutoff <- 0.999
     } else {
       dev.ratio_cutoff <- 0.8
     }
 
-    if (is.null(rp$control$alpha)) rp$control$alpha <-  0
-    if (is.null(rp$control$lambda.min.ratio)) {
+    if (is.null(args$rp$control$alpha)) args$rp$control$alpha <-  0
+    if (is.null(args$rp$control$lambda.min.ratio)) {
       tmp_sc <- apply(x, 2, function(col) sqrt(var(col)*(n-1)/n))
       x2 <- scale(x, center = colMeans(x), scale = tmp_sc)
       ytX <- crossprod(y, x2[,tmp_sc > 0])
       lam_max <- 1000 * max(abs(ytX))/n *
         family$mu.eta(family$linkfun(mean(y)))/
         family$variance(mean(y))
-      rp$control$lambda.min.ratio <- min(0.01, 1e-4 / lam_max)
+      args$rp$control$lambda.min.ratio <- min(0.01, 1e-4 / lam_max)
     }
 
-    control_glmnet <- rp$control[names(rp$control)  %in% names(formals(glmnet))]
+    control_glmnet <- args$rp$control[names(args$rp$control)  %in% names(formals(glmnet))]
     glmnet_res <- do.call(function(...)
-      glmnet(x=x, y=y, ...), control_glmnet)
+      glmnet(x=x, y=y, family = fit_family, ...), control_glmnet)
 
     lam <- min(glmnet_res$lambda[glmnet_res$dev.ratio <= dev.ratio_cutoff])
     scr_coef <- coef(glmnet_res,s=lam)[-1]
     inc_probs <- abs(scr_coef)
     max_inc_probs <- max(inc_probs)
-    attr(rp, "diagvals") <- scr_coef/max_inc_probs
+    attr(args$rp, "diagvals") <- scr_coef/max_inc_probs
   }
-  attr(rp, "diagvals") <- scr_coef/max(inc_probs)
-  return(rp)
+  attr(args$rp, "diagvals") <- scr_coef/max(inc_probs)
+  return(args$rp)
 }
 
 update_rpm_w_data_cw <- function(rpm, rp, included_vector) {
   rpm@x <-  attr(rp, "diagvals")[included_vector]
   return(rpm)
 }
+
+
+
 #'
 #' Sparse embedding matrix
 #'
@@ -246,7 +275,7 @@ update_rpm_w_data_cw <- function(rpm, rp, included_vector) {
 #' @param ... includes arguments which can be passed as attributes to the random
 #' projection matrix
 #' @param control list of arguments to be used in functions
-#' \code{generate_fun}, \code{update_data_fun}, \code{update_rpm_w_data}
+#' \code{generate_fun}, \code{update_rp_fun}, \code{update_rpm_w_data}
 #' @return object of class randomprojection
 #' @description
 #' The entries of the matrix are generated based on \insertCite{Clarkson2013LowRankApprox}{spar}.
@@ -257,7 +286,7 @@ update_rpm_w_data_cw <- function(rpm, rp, included_vector) {
 rp_cw <- constructor_randomprojection(
   "rp_cw",
   generate_fun = generate_cw,
-  update_data_fun = update_data_cw,
+  update_rp_fun = update_rp_cw,
   update_rpm_w_data = update_rpm_w_data_cw
 )
 

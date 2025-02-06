@@ -17,8 +17,11 @@ spar(
   nus = NULL,
   nummods = c(20),
   measure = c("deviance", "mse", "mae", "class", "1-auc"),
+  parallel = FALSE,
   inds = NULL,
   RPMs = NULL,
+  seed = NULL,
+  set.seed.iteration = FALSE,
   ...
 )
 }
@@ -60,6 +63,8 @@ available for all families. Other options are \code{"mse"} or \code{"mae"}
 \code{"1-auc"} (one minus area under the ROC curve) both just for
 binomial family.}
 
+\item{parallel}{assuming a parallel backend is loaded and available, a logical indicating whether the function should use it. Defaults to FALSE.}
+
 \item{inds}{optional list of index-vectors corresponding to variables kept
 after screening in each marginal model of length \code{max(nummods)};
 dimensions need to fit those of RPMs.}
@@ -67,6 +72,11 @@ dimensions need to fit those of RPMs.}
 \item{RPMs}{optional list of projection matrices used in each
 marginal model of length \code{max(nummods)}, diagonal elements will be
 overwritten with a coefficient only depending on the given \code{x} and \code{y}.}
+
+\item{seed}{integer seed to be set at the beginning of the SPAR algorithm. Default to NULL, in which case no seed is set.}
+
+\item{set.seed.iteration}{a boolean indicating whether a different seed should be set in each marginal model \code{i}.
+This will be set to  \code{seed + i}.}
 
 \item{...}{further arguments mainly to ensure back-compatibility}
 }
@@ -93,6 +103,9 @@ if \code{FALSE}, training data were used for validation
 \item \code{rp} an object of class "\code{randomprojection}"
 \item \code{screencoef} an object of class "\code{screeningcoef}"
 }
+If a parallel backend is registered and \code{parallel = TRUE},
+the \link[foreach]{foreach} function
+is used to estimate the marginal models in parallel.
 }
 \description{
 Apply Sparse Projected Averaged Regression to High-dimensional Data

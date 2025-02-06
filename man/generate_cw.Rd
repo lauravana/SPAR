@@ -4,7 +4,7 @@
 \alias{generate_cw}
 \title{Sparse embedding matrix}
 \usage{
-generate_cw(rp, m, included_vector)
+generate_cw(rp, m, included_vector, x = NULL, y = NULL)
 }
 \arguments{
 \item{m}{goal dimension, which will be randomly sampled in the SPAR algorithm}
@@ -12,6 +12,10 @@ generate_cw(rp, m, included_vector)
 \item{included_vector}{integer vector of column indices for the variables to be
 included in the random projection. These indices are produced in the
 screening step of the SPAR algorithm.}
+
+\item{x}{matrix of predictors}
+
+\item{y}{vector of response variable}
 }
 \value{
 (possibly sparse) matrix with m rows and

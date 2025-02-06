@@ -23,7 +23,8 @@ Imports:
     ggplot2,
     tidyr,
     rlang,
-    glmnet
+    glmnet,
+    foreach
 RdMacros: Rdpack
 Encoding: UTF-8
 LazyData: true

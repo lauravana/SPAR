@@ -16,6 +16,9 @@ spar.cv(
   nus = NULL,
   nummods = c(20),
   measure = c("deviance", "mse", "mae", "class", "1-auc"),
+  parallel = FALSE,
+  seed = NULL,
+  set.seed.iteration = FALSE,
   ...
 )
 }
@@ -33,7 +36,7 @@ default \code{gaussian("identity")}.}
 
 \item{screencoef}{function creating a "\code{screeningcoef}" object}
 
-\item{nfolds}{number of folds to use for cross-validation; should be greater than 2, defaults to 10.}
+\item{nfolds}{number of folds to use for cross-validation; should be at least 2, defaults to 10.}
 
 \item{nnu}{number of different threshold values \eqn{\nu} to consider for thresholding;
 ignored when \code{nus} is provided; defaults to 20.}
