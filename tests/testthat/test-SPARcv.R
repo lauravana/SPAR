@@ -3,7 +3,7 @@
 test_that("Results has right class", {
   x <- data.frame(matrix(rnorm(300), ncol = 30))
   y <- rnorm(10)
-  spar_res <- spar.cv(x,y, model = spar_glm())
+  spar_res <- spar.cv(x,y, rp=rp_gaussian(),model = spar_glm())
   expect_equal(class(spar_res),"spar.cv")
 })
 
@@ -18,7 +18,8 @@ test_that("Coef returns vector of correct length", {
 test_that("Coef is more sparse for 1se rule", {
   x <- matrix(rnorm(300), ncol = 30)
   y <- rnorm(10)
-  spar_res <- spar.cv(x,y, model = spar_glm())
+  spar_res <- spar.cv(x,y,screencoef = screen_glmnet(),
+                      model = spar_glm())
   sparcoef <- coef(spar_res,opt_par = "best")
   sparcoef2 <- coef(spar_res,opt_par = "1se")
   expect_equal(all(which(sparcoef$beta==0) %in% which(sparcoef2$beta==0)),TRUE)
@@ -27,14 +28,16 @@ test_that("Coef is more sparse for 1se rule", {
 test_that("Validated nu values are same as the ones for initial SPAR fit", {
   x <- data.frame(matrix(rnorm(300), ncol = 30))
   y <- rnorm(10)
-  spar_res <- spar.cv(x,y,nummods=c(10,15), model = spar_glm())
+  spar_res <- spar.cv(x,y,screencoef = screen_glmnet(),
+                      nummods=c(10,15), model = spar_glm())
   expect_equal(unique(spar_res$val_sum$nu),as.numeric(spar_res$nus))
 })
 
 test_that("Validated nummod values are same as the ones for initial SPAR fit", {
   x <- data.frame(matrix(rnorm(300), ncol = 30))
   y <- rnorm(10)
-  spar_res <- spar.cv(x,y,nummods=c(10,15), model = spar_glm())
+  spar_res <- spar.cv(x,y,screencoef = screen_glmnet(),
+                      nummods=c(10,15), model = spar_glm())
   expect_equal(unique(spar_res$val_sum$nummod),as.numeric(spar_res$nummods))
 })
 
@@ -42,7 +45,8 @@ test_that("Columns with zero sd get coefficient 0", {
   x <- example_data$x
   x[,c(1,11,111)] <- 2
   y <- example_data$y
-  spar_res <- spar.cv(x, y, measure = "mae", model = spar_glm())
+  spar_res <- spar.cv(x, y, screencoef = screen_glmnet(),
+                      measure = "mae", model = spar_glm())
   sparcoef <- coef(spar_res)
   expect_equal(sparcoef$beta[c(1,11,111)],c(0,0,0))
 })

@@ -1,8 +1,9 @@
-check_and_set_args <- function(args, family, model, screencoef, rp,  measure) {
+check_and_set_args <- function(args, x, y, family, model, screencoef, rp,  measure) {
   ## Check screen coef
-  if (is.null(screencoef)) screencoef <- screen_glmnet()
+  if (is.null(screencoef)) {
+    screencoef <- screen_glmnet(nscreen = ncol(x))
+  }
   if (!is.null(args$nscreen)) attr(screencoef, "nscreen") <- args$nscreen
-  if (!is.null(args$split_data))  attr(screencoef, "split_data") <- args$split_data
   ##  Check if the old argument name 'old_arg' is used
   if (!is.null(args$type.measure)) {
     if (!is.null(measure)) {

@@ -7,13 +7,15 @@
 #'    function should have arguments  and   \code{y} (vector of responses -- standardized
 #'    for Gaussian family), \code{z} (the matrix of projected predictors) and a
 #'    "\code{sparmodel}" \code{object}.
+#' @param update_fun optional function for updating the "\code{sparmodel}" object. before the
+#' start of the algorithm.
 #' @return a function which in turn creates a function which in turn creates an
 #'    object of class "\code{sparmodel}".
 #' @description
 #' The created function will return a object of class "\code{sparmodel}" which
 #' constitutes of a list.
 #' @export
-constructor_sparmodel <- function(name, model_fun, update_sparmodel = NULL) {
+constructor_sparmodel <- function(name, model_fun, update_fun = NULL) {
   ## Checks
   args_generate_fun <- formals(model_fun)
   stopifnot("Function model_fun should contain three arguments: y, z and an object
@@ -27,7 +29,7 @@ constructor_sparmodel <- function(name, model_fun, update_sparmodel = NULL) {
   function(..., control = list()) {
     out <- list(name = name,
                 model_fun = model_fun,
-                update_sparmodel = update_sparmodel,
+                update_fun = update_fun,
                 control = control)
     attr <- list2(...)
     attributes(out) <- c(attributes(out), attr)
@@ -50,7 +52,7 @@ constructor_sparmodel <- function(name, model_fun, update_sparmodel = NULL) {
 #'  \item \code{model_fun}  for generating the screening coefficient.
 #'   This function should have arguments \code{y}, vector of standardized responses,
 #'   \code{z}, a matrix of projected predictors in each marginal model, and \code{object}, which is a "\code{sparmodel}" object. Returns a list with two elements: \code{gammas} which is the vector of regression coefficients for the projected predictors and \code{intercept} which is the intercept of the model.
-#'  \item \code{update_sparmodel}  optional function for updating the sparmodel object. before the
+#'  \item \code{update_fun}  optional function for updating the sparmodel object. before the
 #' start of the algorithm.
 #' }
 #' @description
@@ -65,7 +67,7 @@ spar_glmnet <- function(..., control = list()) {
   }
   out <-  list(name = "glmnet",
                model_fun = model_glmnet,
-               update_sparmodel = update_sparmodel_glmnet,
+               update_fun = update_sparmodel_glmnet,
                control = control)
   attr <- list2(...)
   attributes(out) <- c(attributes(out), attr)
@@ -149,11 +151,12 @@ model_glm <- function(y, z, object) {
                        })
     intercept <- 0
   } else {
-    glm_res <- do.call(function(...) glm.fit(x = z, y = y, ...),
+    glm_res <- do.call(function(...) glm(y ~ z, ...),
                        object$control)
     intercept <- coef(glm_res)[1]
     gammas <- coef(glm_res)[-1]
   }
+
   list(gammas = gammas, intercept = intercept)
 }
 

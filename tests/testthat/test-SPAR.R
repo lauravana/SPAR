@@ -49,7 +49,6 @@ test_that("Returned coef and preds are correct for fixed screening and projectio
                    RPMs = list(RP1,RP2))
   sparcoef <- coef(spar_res)
   pred     <- predict(spar_res,xnew=xnew)
-
   expect_equal(sparcoef$nu,0.002285171,tolerance = 1e-6)
   expect_equal(sparcoef$beta[53],0)
   expect_equal(sparcoef$beta[1],0.125971, tolerance = 1e-6)
@@ -79,18 +78,17 @@ test_that("Returned coef and preds are correct for fixed screening and projectio
                    RPMs = list(RP1,RP2),family = binomial(logit))
   sparcoef <- coef(spar_res)
   pred <- predict(spar_res,xnew=xnew)
-
   expect_equal(sparcoef$nu,0.009850679 ,tolerance = 1e-6)
   expect_equal(sparcoef$beta[11],0)
   expect_equal(sparcoef$beta[1],0.04795905,tolerance = 1e-6)
   expect_equal(pred[1],0.9749038,tolerance = 1e-5)
+
 })
 
 test_that("Columns with zero sd get ceofficient 0", {
   x <- example_data$x
   x[,c(1,11,111)] <- 2
   y <- example_data$y
-
   spar_res <- spar(x,y)
   sparcoef <- coef(spar_res)
   expect_equal(sparcoef$beta[c(1,11,111)],c(0,0,0))
@@ -100,7 +98,8 @@ test_that("Thresholding can be avoided ", {
   x <- example_data$x
   y <- example_data$y
   set.seed(123)
-  spar_res <- spar(x, y, nus = 0, model = spar_glm())
+  spar_res <- spar(x, y, screencoef = screen_glmnet(),
+                   nus = 0, model = spar_glm())
   sparcoef <- coef(spar_res)
   expect_equal(sparcoef$beta[c(4,10)],c(0,0))
 })
@@ -113,23 +112,63 @@ test_that("Data splitting delivers different results", {
                    screencoef = screen_cor(split_data_prop = 0.25))
   set.seed(123)
   spar_res3 <- spar(x,y,
-                    screencoef = screen_cor(split_data = TRUE))
+                    screencoef = screen_cor(split_data = TRUE)) # this should not work
   set.seed(123)
   spar_res2 <- spar(x,y,
                     screencoef = screen_cor())
   sparcoef <- coef(spar_res)
   sparcoef2 <- coef(spar_res2)
   sparcoef3 <- coef(spar_res3)
-  expect_true(any(sparcoef$beta[c(13,38,43)] != sparcoef2$beta[c(13,38,43)]))
-  expect_equal(sparcoef$beta[c(13,38,43)], sparcoef3$beta[c(13,38,43)])
+  expect_true(any(sparcoef$beta[c(8,9,12)] != sparcoef2$beta[c(8,9,12)]))
+  expect_equal(sparcoef2$beta[c(8,9,12)], sparcoef3$beta[c(8,9,12)])
 })
 
 test_that("Test the gaussian rp", {
   x <- example_data$x
   y <- example_data$y
   set.seed(123)
-  spar_g_res <- spar(x,y, rp = rp_gaussian())
+  spar_g_res <- spar(x,y, screencoef = screen_glmnet(),
+                     rp = rp_gaussian())
+  set.seed(123)
+  spar_g_res2 <- spar(x,y,screencoef = screen_glmnet(),
+                      rp = rp_gaussian(sd = 0.1))
+  ##
   expect_equal(round(spar_g_res$val_res$Meas[1], 2), 17873.92)
+  expect_equal(round(spar_g_res2$val_res$Meas[1], 2), 17873.92)
+  expect_equal(spar_g_res$val_res$Meas[1], spar_g_res2$val_res$Meas[1])
+})
+
+test_that("Test the sparse rp", {
+  x <- example_data$x
+  y <- example_data$y
+  set.seed(12345)
+  spar_sparse_res <- spar(x,y,screencoef = screen_glmnet(),
+                          rp = rp_sparse())
+  set.seed(12345)
+  spar_sparse_res2 <- spar(x,y, screencoef = screen_glmnet(),
+                           rp = rp_sparse(psi = 0.01))
+  expect_equal(round(spar_sparse_res$val_res$Meas[1], 2), 19028.88)
+  expect_equal(round(spar_sparse_res2$val_res$Meas[1], 2), 19004.14)
+  expect_true(spar_sparse_res$val_res$Meas[1] != spar_sparse_res2$val_res$Meas[1])
+})
+test_that("Test the CW rp", {
+  x <- example_data$x
+  y <- example_data$y
+  set.seed(123)
+  spar_cw_res <- spar(x,y, screencoef = screen_glmnet(),
+                     rp = rp_cw())
+  expect_equal(round(spar_cw_res$val_res$Meas[1], 2), 16841.77)
+})
+
+test_that("Test the screen_glm() with poisson family", {
+  x <- example_data$x
+  y <- example_data$y
+  yval <- round(abs(y))
+  set.seed(123)
+  spar_screen_glm <- spar(x,yval, family = poisson(),
+                          screencoef = screen_marglik(),
+                      rp = rp_gaussian())
+  expect_equal(round(spar_screen_glm$val_res$Meas[1], 2), 1431.17)
 })
 
 test_that("Get same results with parallel option", {
@@ -138,13 +177,14 @@ test_that("Get same results with parallel option", {
   set.seed(123)
   spar_res <- spar(x, y, screencoef = screen_cor(), rp = rp_gaussian(),
                    seed = 123, set.seed.iteration = TRUE)
-  library(doParallel)
-  cl <- makeCluster(2, type = "FORK")
-  registerDoParallel(cl)
-  spar_res2 <- spar(x, y, screencoef = screen_cor(), rp = rp_gaussian(),
-                    parallel = TRUE, set.seed.iteration = TRUE, seed = 123)
-  stopImplicitCluster()
-  expect_equal(spar_res$betas[1:10],  spar_res2$betas[1:10])
+  if (requireNamespace("doParallel", quietly = TRUE)) {
+    cl <- parallel::makeForkCluster(2)
+    doParallel::registerDoParallel(cl)
+    spar_res2 <- spar(x, y, screencoef = screen_cor(), rp = rp_gaussian(),
+                      parallel = TRUE, set.seed.iteration = TRUE, seed = 123)
+    doParallel::stopImplicitCluster()
+    expect_equal(spar_res$betas[1:10],  spar_res2$betas[1:10])
+  }
 })
 
 

@@ -17,8 +17,10 @@
 #' @param family  a \link[stats]{family}  object used for the marginal generalized linear model,
 #'        default \code{gaussian("identity")}.
 #' @param model function creating a "\code{sparmodel}" object; defaults to \code{spar_glmnet()}.
-#' @param rp function creating a "\code{randomprojection}" object.
-#' @param screencoef function creating a "\code{screeningcoef}" object
+#' @param rp function creating a "\code{randomprojection}" object. Defaults to NULL.
+#' In this case \code{rp_cw(data = TRUE)} is used.
+#' @param screencoef function creating a "\code{screeningcoef}" object. Defaults to NULL.
+#' In this case no screening is used is used.
 #' @param xval optional matrix of predictor variables observations used for
 #'        validation of threshold nu and number of models; \code{x} is used
 #'        if not provided.
@@ -105,14 +107,14 @@
 #' plot(spar_res,"coefs",prange=c(1,400))}
 #' @seealso [spar.cv],[coef.spar],[predict.spar],[plot.spar],[print.spar]
 #' @export
-#' @importFrom stats glm.fit coef fitted gaussian predict rnorm quantile residuals sd var cor glm
+#' @importFrom stats reshape glm.fit coef fitted gaussian predict rnorm quantile residuals sd var cor glm
 #' @importFrom Matrix Matrix solve crossprod tcrossprod rowMeans
 #' @importFrom Rdpack reprompt
 #' @importFrom rlang list2
 #' @importFrom glmnet glmnet
 #' @importFrom ROCR prediction performance
-#' @importFrom foreach foreach getDoParRegistered %do% %dopar%
-#'
+# #' @importFrom foreach foreach getDoParName getDoParWorkers getDoParRegistered %do% %dopar%
+#' @importFrom methods as
 spar <- function(x, y,
                  family = gaussian("identity"),
                  model = NULL,
@@ -134,7 +136,7 @@ spar <- function(x, y,
   stopifnot("Response y must be numeric." = is.numeric(y))
   # Ensure back compatibility ----
   args <- list(...)
-  arg_list <- check_and_set_args(args, family, model,
+  arg_list <- check_and_set_args(args, x, y, family, model,
                                  screencoef, rp,  measure)
   model <- arg_list$model; rp <- arg_list$rp
   screencoef <- arg_list$screencoef; measure <- arg_list$measure
@@ -197,20 +199,16 @@ spar_algorithm <- function(x, y,
       model$control$family <- attr(model, "family")
     }
   }
-  if (!is.null(model$update_sparmodel)) {
-    model <- model$update_sparmodel(model)
+
+  if (!is.null(model$update_fun)) {
+    model <- model$update_fun(model)
   }
   # Setup screening ----
   family_str <- paste0(family$family, "(", family$link, ")")
   if (is.null(attr(screencoef, "family"))) {
     attr(screencoef, "family_string") <- family_str
   }
-  if (!is.null(attr(screencoef, "split_data")) &
-      is.null(attr(screencoef, "split_data_prop"))) {
-    attr(screencoef, "split_data_prop") <- 0.25
-  }
   if (!is.null(attr(screencoef, "split_data_prop"))) {
-    attr(screencoef, "split_data") <- TRUE
     scr_inds <- sample(n,
                        ceiling(n * attr(screencoef, "split_data_prop")))  # TODO need to parametrize this
     mar_inds <- seq_len(n)[-scr_inds]
@@ -244,22 +242,13 @@ spar_algorithm <- function(x, y,
     attr(screencoef, "inc_prob") <- inc_probs
   } else {
     scr_coef <- NULL
-    message("nscreen >= p. No screening performed.")
+    # message("No screening performed.")
   }
 
   # Update RP ----
-  all_args <- list(x = x, y = y, family = family,
-                   model = model, rp = rp,
-                   screencoef = screencoef,
-                   xval = xval, yval = yval,
-                   nnu = nnu, nus=nus,
-                   nummods=nummods, measure=measure,
-                   inds = inds, RPMs = RPMs,
-                   parallel = parallel,
-                   seed = seed,
-                   set.seed.iteration = set.seed.iteration)
-  rp <- do.call(rp$update_rp_fun, all_args)
-
+  thiscall <- match.call(expand.dots = TRUE)
+  rp <- eval.parent(as.call(c(list(rp$update_fun),
+                              as.list(thiscall)[-1])))
   max_num_mod <- max(nummods)
 
   if (!is.null(seed)) set.seed(seed)
@@ -285,12 +274,11 @@ spar_algorithm <- function(x, y,
     out <- list()
     if (drawinds) {
       if (nscreen < p) {
-        if (attr(screencoef, "type") == "fixed") {
-          ind_use <- order(inc_probs, decreasing = TRUE)[seq_len(nscreen)]
-        }
-        if (attr(screencoef, "type") == "prob") {
-          ind_use <- sample(actual_p, nscreen, prob=inc_probs)
-        }
+        ind_use <- switch(attr(screencoef, "type"),
+          "fixed" =  order(inc_probs, decreasing = TRUE)[seq_len(nscreen)],
+          "prob"  =  sample(actual_p, nscreen, prob=inc_probs),
+          stop("Type of screening coef should be fixed or prob.")
+        )
       } else {
         ind_use <- seq_len(actual_p)
       }
@@ -322,8 +310,7 @@ spar_algorithm <- function(x, y,
 
     ## Marginal model ----
     znew <- Matrix::tcrossprod(z[mar_inds, ind_use], RPM)
-
-    res <- model$model_fun(yz[mar_inds], znew, object = model)
+    res <- model$model_fun(y = yz[mar_inds], z = znew, object = model)
     out$intercepts <- res$intercept
     out$betas_std_m <-  as(numeric(actual_p), "sparseMatrix")
     out$betas_std_m[ind_use] <- crossprod(RPM, res$gammas)
@@ -333,6 +320,17 @@ spar_algorithm <- function(x, y,
   if (parallel) {
     # honor registration made by user, and only create and register
     # our own cluster object once
+    if (!requireNamespace("foreach", quietly = TRUE)) {
+      stop("Package 'foreach' is required for parallel execution. Please install it using install.packages('foreach').")
+    }
+    # Load foreach functions
+    foreach <- getNamespace("foreach")$foreach
+    `%dopar%` <- getNamespace("foreach")$`%dopar%`
+    `%do%` <- getNamespace("foreach")$`%do%`
+    getDoParRegistered <- getNamespace("foreach")$getDoParRegistered
+    getDoParName <- getNamespace("foreach")$getDoParName
+    getDoParWorkers <- getNamespace("foreach")$getDoParWorkers#
+
     if (!getDoParRegistered()) {
       message('Warning: No doPar backend. Executing SPAR algorithm sequentially.
                For using parallelization, please register backend and rerun.')
@@ -342,15 +340,30 @@ spar_algorithm <- function(x, y,
               getDoParWorkers(), ' workers')
       `%d%` <- `%dopar%`
     }
+
+    # Parallel computation example
+    result <- foreach(i = 1:10, .combine = c) %dopar% {
+      i^2
+    }
+    if (!getDoParRegistered()) {
+      message('Warning: No doPar backend. Executing SPAR algorithm sequentially.
+               For using parallelization, please register backend and rerun.')
+      `%d%` <- `%do%`
+    } else {
+      message('Using ', getDoParName(), ' with ',
+              getDoParWorkers(), ' workers')
+      `%d%` <- `%dopar%`
+    }
+    i <- NULL
+    res_all <- foreach(i = seq_len(max_num_mod),
+                       .verbose = FALSE,
+                       .packages = "spar",
+                       .errorhandling = "stop") %d% {
+                         marginal_model_function(i = i)
+                       }
   } else {
-    # message('Executing SPAR algorithm sequentially.')
-    `%d%` <- `%do%`
+    res_all <- lapply(seq_len(max_num_mod), marginal_model_function)
   }
-  res_all <- foreach(i = seq_len(max_num_mod),
-                     .verbose = FALSE,
-                     .packages = "spar",
-                     .errorhandling = "stop") %d%
-    marginal_model_function(i)
 
   if (drawRPMs) RPMs <- lapply(res_all, "[[", "RPMs")
   if (drawinds) inds <- lapply(res_all, "[[", "inds")
@@ -413,11 +426,6 @@ spar_algorithm <- function(x, y,
 
 
   ## Clean up
-  family_str <- paste0(family$family, "(", family$link, ")")
-  # attr(rp,"family") <- paste0(attr(rp,"family")$family, "(",
-  #                         attr(rp,"family")$link, ")")
-  # attr(screencoef,"family") <- paste0(attr(screencoef,"family")$family, "(",
-  #                             attr(screencoef,"family")$link, ")")
   res <- list(betas = betas, intercepts = intercepts,
               scr_coef = scr_coef,
               inds = inds, RPMs = RPMs,
@@ -697,8 +705,11 @@ plot.spar <- function(x,
                                   function(row)row[order(abs(row),decreasing = TRUE)])),
                           predictor=1:p)
     colnames(tmp_mat) <- c(1:nummod,"predictor")
-    tmp_df <- tidyr::pivot_longer(tmp_mat,cols = (1:nummod),
-                                  names_to = "marginal model",values_to = "value")
+    tmp_df <- reshape(tmp_mat, idvar = "predictor",
+                      varying = seq_len(nummod),
+                      v.names = "value",
+                      timevar = "marginal model",
+                      direction = "long")
 
     tmp_df$`marginal model` <- as.numeric(tmp_df$`marginal model`)
 
@@ -728,7 +739,8 @@ plot.spar <- function(x,
 print.spar <- function(x, ...) {
   mycoef <- coef(x)
   beta <- mycoef$beta
-  Meas <- x$val_res$Meas[mycoef$nu == x$val_res$nu]
+  Meas <- x$val_res$Meas[mycoef$nu == x$val_res$nu &
+                        mycoef$nummod == x$val_res$nummod ]
   cat(sprintf("spar object:\nSmallest Validation Measure of %s reached for nummod=%d,
               nu=%s leading to %d / %d active predictors.\n",
               formatC(Meas,digits = 2,format = "e"),

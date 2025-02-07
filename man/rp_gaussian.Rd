@@ -11,11 +11,11 @@ rp_gaussian(..., control = list())
 projection matrix}
 
 \item{control}{list of arguments to be used in functions
-\code{generate_fun}, \code{update_rp_fun}, \code{update_rpm_w_data}}
+\code{generate_fun}, \code{update_fun}, \code{update_rpm_w_data}}
 }
 \value{
 object of class "\code{randomprojection}" with is a list with elements name,
-generate_fun, update_rp_fun, control
+generate_fun, update_fun, control
 }
 \description{
 The entries of the matrix will be generated from

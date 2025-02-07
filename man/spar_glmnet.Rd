@@ -21,7 +21,7 @@ object of class "\code{sparmodel}" which is a list with elements
 \item \code{model_fun}  for generating the screening coefficient.
 This function should have arguments \code{y}, vector of standardized responses,
 \code{z}, a matrix of projected predictors in each marginal model, and \code{object}, which is a "\code{sparmodel}" object. Returns a list with two elements: \code{gammas} which is the vector of regression coefficients for the projected predictors and \code{intercept} which is the intercept of the model.
-\item \code{update_sparmodel}  optional function for updating the sparmodel object. before the
+\item \code{update_fun}  optional function for updating the sparmodel object. before the
 start of the algorithm.
 }
 }

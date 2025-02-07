@@ -7,7 +7,7 @@
 constructor_randomprojection(
   name,
   generate_fun,
-  update_rp_fun = NULL,
+  update_fun = NULL,
   update_rpm_w_data = NULL,
   control = list()
 )
@@ -23,7 +23,7 @@ Vector \code{included_vector} shows the column index of the original variables i
 \code{x} matrix to be projected using the random projection. This is needed
 due to the fact that screening is employed pre-projection.}
 
-\item{update_rp_fun}{function for updating the randomprojection object with
+\item{update_fun}{function for updating the randomprojection object with
 information from the data. This
 function should have arguments \code{rp}, which is a randomprojection
 object and \code{x} (the matrix of predictors)

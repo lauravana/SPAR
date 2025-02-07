@@ -227,6 +227,6 @@ print.screencoef <- function(x, ...) {
                      sprintf("num [1:%d] %s ...", length(imp_vals),
                              paste(round(imp_vals[1:5], 3),
                                    collapse = " ")),
-                     "not yet computed from the data.")
+                     "not (yet) computed from the data.")
   cat("* screening coefficients:", out_imp,  "\n")
 }

@@ -4,7 +4,7 @@
 \alias{constructor_sparmodel}
 \title{Constructor function for building sparmodel objects}
 \usage{
-constructor_sparmodel(name, model_fun, update_sparmodel = NULL)
+constructor_sparmodel(name, model_fun, update_fun = NULL)
 }
 \arguments{
 \item{name}{character}
@@ -13,6 +13,9 @@ constructor_sparmodel(name, model_fun, update_sparmodel = NULL)
 function should have arguments  and   \code{y} (vector of responses -- standardized
 for Gaussian family), \code{z} (the matrix of projected predictors) and a
 "\code{sparmodel}" \code{object}.}
+
+\item{update_fun}{optional function for updating the "\code{sparmodel}" object. before the
+start of the algorithm.}
 }
 \value{
 a function which in turn creates a function which in turn creates an

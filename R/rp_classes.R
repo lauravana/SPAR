@@ -3,7 +3,7 @@ update_rp <- function(...) {
   args <- list2(...)
   if (is.null(attr(args$rp, "family"))) {
     family_string <- paste0(args$family$family, "(", args$family$link, ")")
-    attr(args$rp, "family_string") <- args$family
+    attr(args$rp, "family_string") <- family_string
   }
   args$rp
 }
@@ -20,7 +20,7 @@ update_rp <- function(...) {
 #' Vector \code{included_vector} shows the column index of the original variables in the
 #' \code{x} matrix to be projected using the random projection. This is needed
 #' due to the fact that screening is employed pre-projection.
-#' @param update_rp_fun function for updating the randomprojection object with
+#' @param update_fun function for updating the randomprojection object with
 #' information from the data. This
 #' function should have arguments \code{rp}, which is a randomprojection
 #' object and `x` (the matrix of predictors)
@@ -38,16 +38,16 @@ update_rp <- function(...) {
 #' @export
 constructor_randomprojection <- function(name,
                                          generate_fun,
-                                         update_rp_fun = NULL,
+                                         update_fun = NULL,
                                          update_rpm_w_data = NULL,
                                          control = list()) {
   ## Checks
   stopifnot("Function generate_fun needs arguments rp, m, included_vector, x, y."=
               names(formals(generate_fun)) %in% c("rp", "m", "included_vector", "x", "y"))
-  if (!is.null(update_rp_fun)) {
-    stopifnot("Function update_rp_fun should have as argument .... All arguments of spar are passed through ..."=names(formals(update_rp_fun)) %in% c("..."))
+  if (!is.null(update_fun)) {
+    stopifnot("Function update_fun should have as argument .... All arguments of spar are passed through ..."=names(formals(update_fun)) %in% c("..."))
   } else {
-    update_rp_fun <- update_rp
+    update_fun <- update_rp
   }
   if (!is.null(update_rpm_w_data)) {
     stopifnot(
@@ -57,15 +57,11 @@ constructor_randomprojection <- function(name,
   function(..., control = list()) {
     out <- list(name = name,
                 generate_fun = generate_fun,
-                update_rp_fun = update_rp_fun,
+                update_fun = update_fun,
                 update_rpm_w_data = update_rpm_w_data,
                 control = control)
     attr <- list2(...)
     attributes(out) <- c(attributes(out), attr)
-    if (is.null(attr(out, "data"))) {
-      attr(out, "data") <- ifelse(is.null(out$update_rp_fun),
-                                  FALSE, TRUE)
-    }
     class(out) <- c("randomprojection")
     return(out)
   }
@@ -87,7 +83,7 @@ constructor_randomprojection <- function(name,
 #' @keywords internal
 generate_gaussian <- function(rp, m, included_vector, x = NULL, y = NULL) {
   p <- length(included_vector)
-  control_rnorm <-c(
+  control_rnorm <- c(
     rp$control[names(rp$control) %in% names(formals(rnorm))],
     attributes(rp)[names(attributes(rp)) %in% names(formals(rnorm))])
   # remove duplicates
@@ -99,13 +95,15 @@ generate_gaussian <- function(rp, m, included_vector, x = NULL, y = NULL) {
   return(RM)
 }
 #'
+
+#'
 #' Creates an object class "\code{randomprojection}" using arguments passed by user.
 #' @param ... includes arguments which can be passed as attributes to the random
 #' projection matrix
 #' @param control list of arguments to be used in functions
-#' \code{generate_fun}, \code{update_rp_fun}, \code{update_rpm_w_data}
+#' \code{generate_fun}, \code{update_fun}, \code{update_rpm_w_data}
 #' @return object of class "\code{randomprojection}" with is a list with elements name,
-#' generate_fun, update_rp_fun, control
+#' generate_fun, update_fun, control
 #' @description
 #' The entries of the matrix will be generated from
 #' a normal distribution (mean 0 and standard deviation 1 by default).
@@ -132,7 +130,8 @@ rp_gaussian <- constructor_randomprojection(
 #' @keywords internal
 generate_sparse <- function(rp, m, included_vector, x = NULL, y = NULL) {
   p <- length(included_vector)
-  psi <- attr(rp, "psi")
+  psi <- rp$control$psi
+  if (is.null(psi)) psi <- attr(rp, "psi")
   if (is.null(psi)) psi <- 1
   if (psi > 1 | psi <= 0) stop("For a sparse rpm, psi should lie in interval (0,1].")
   v <- sample(c(-1, 0, 1), size = m * p,
@@ -151,7 +150,7 @@ generate_sparse <- function(rp, m, included_vector, x = NULL, y = NULL) {
 #' projection matrix. The possible argument is \code{psi} in (0,1] which determines
 #' the level of sparsity in the matrix.
 #' @param control list of arguments to be used in functions
-#' \code{generate_fun}, \code{update_rp_fun}, \code{update_rpm_w_data}
+#' \code{generate_fun}, \code{update_fun}, \code{update_rpm_w_data}
 #' @return object of class "\code{randomprojection}"
 #' @description
 #' The sparse matrix used in \insertCite{ACHLIOPTAS2003JL}{spar} with entries equal to
@@ -182,13 +181,18 @@ rp_sparse <- constructor_randomprojection(
 generate_cw <- function(rp, m, included_vector, x = NULL, y = NULL) {
   p <- length(included_vector)
   use_data <- attr(rp, "data")
-  if (!use_data) {
+  if (is.null(use_data)) {
     diagvals <- sample(c(-1, 1), p, replace = TRUE)
   } else {
-    if (is.null(attr(rp, "diagvals")))
-      stop("Must provide vector of coefficients for data-driven RP.")
-    diagvals <- attr(rp, "diagvals")[included_vector]
+    if (use_data) {
+      if (is.null(attr(rp, "diagvals")))
+        stop("Must provide vector of coefficients for data-driven RP.")
+      diagvals <- attr(rp, "diagvals")[included_vector]
+    } else {
+      diagvals <- sample(c(-1, 1), p, replace = TRUE)
+    }
   }
+
   goal_dims <- sample(m, p, replace = TRUE)
   counter <- 0
   # remove zero rows
@@ -238,18 +242,18 @@ update_rp_cw <- function(...) {
 
     if (is.null(args$rp$control$alpha)) args$rp$control$alpha <-  0
     if (is.null(args$rp$control$lambda.min.ratio)) {
-      tmp_sc <- apply(x, 2, function(col) sqrt(var(col)*(n-1)/n))
-      x2 <- scale(x, center = colMeans(x), scale = tmp_sc)
-      ytX <- crossprod(y, x2[,tmp_sc > 0])
+      tmp_sc <- apply(args$x, 2, function(col) sqrt(var(col)*(n-1)/n))
+      x2 <- scale(args$x, center = colMeans(args$x), scale = tmp_sc)
+      ytX <- crossprod(args$y, x2[,tmp_sc > 0])
       lam_max <- 1000 * max(abs(ytX))/n *
-        family$mu.eta(family$linkfun(mean(y)))/
-        family$variance(mean(y))
+        family$mu.eta(family$linkfun(mean(args$y)))/
+        family$variance(mean(args$y))
       args$rp$control$lambda.min.ratio <- min(0.01, 1e-4 / lam_max)
     }
 
     control_glmnet <- args$rp$control[names(args$rp$control)  %in% names(formals(glmnet))]
     glmnet_res <- do.call(function(...)
-      glmnet(x=x, y=y, family = fit_family, ...), control_glmnet)
+      glmnet(x = args$x, y = args$y, family = fit_family, ...), control_glmnet)
 
     lam <- min(glmnet_res$lambda[glmnet_res$dev.ratio <= dev.ratio_cutoff])
     scr_coef <- coef(glmnet_res,s=lam)[-1]
@@ -275,7 +279,7 @@ update_rpm_w_data_cw <- function(rpm, rp, included_vector) {
 #' @param ... includes arguments which can be passed as attributes to the random
 #' projection matrix
 #' @param control list of arguments to be used in functions
-#' \code{generate_fun}, \code{update_rp_fun}, \code{update_rpm_w_data}
+#' \code{generate_fun}, \code{update_fun}, \code{update_rpm_w_data}
 #' @return object of class randomprojection
 #' @description
 #' The entries of the matrix are generated based on \insertCite{Clarkson2013LowRankApprox}{spar}.
@@ -286,7 +290,7 @@ update_rpm_w_data_cw <- function(rpm, rp, included_vector) {
 rp_cw <- constructor_randomprojection(
   "rp_cw",
   generate_fun = generate_cw,
-  update_rp_fun = update_rp_cw,
+  update_fun = update_rp_cw,
   update_rpm_w_data = update_rpm_w_data_cw
 )
 
@@ -301,7 +305,7 @@ rp_cw <- constructor_randomprojection(
 print.randomprojection <- function(x, ...) {
   cat(paste0("Name: ", x$name), "\n")
   cat("Main attributes:", "\n")
-  cat("* Data-dependent:", attr(x,"data"), "\n")
+  # cat("* Data-dependent:", attr(x,"data"), "\n")
   cat("* Lower bound on goal dimension m:",
       ifelse(is.null(attr(x, "mslow")),
              "not provided, will default to log(p).",

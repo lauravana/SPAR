@@ -32,6 +32,10 @@
 # #' @param type.screening  type of screening coefficients; one of \code{"ridge"},
 # #'        \code{"marglik"}, \code{"corr"}; defaults to \code{"ridge"} which is
 # #'        based on the ridge coefficients where the penalty converges to zero.
+#' @param parallel assuming a parallel backend is loaded and available, a logical indicating whether the function should use it. Defaults to FALSE.
+#' @param seed integer seed to be set at the beginning of the SPAR algorithm. Default to NULL, in which case no seed is set.
+#' @param set.seed.iteration a boolean indicating whether a different seed should be set in each marginal model \code{i}.
+#'   This will be set to  \code{seed + i}.
 #' @param ... further arguments mainly to ensure back-compatibility
 #' @returns object of class \code{"spar.cv"} with elements
 #' \itemize{
@@ -96,7 +100,7 @@ spar.cv <- function(x, y,
 
   # Ensure back compatibility ----
   args <- list(...)
-  arg_list <- check_and_set_args(args, family, model,
+  arg_list <- check_and_set_args(args, x, y, family, model,
                                  screencoef, rp,  measure)
   model <- arg_list$model; rp <- arg_list$rp
   screencoef <- arg_list$screencoef; measure <- arg_list$measure
@@ -130,6 +134,7 @@ spar.cv <- function(x, y,
       xval = x[fold_id,SPARres$xscale>0],
       yval = y[fold_id],
       rp = rp, screencoef = screencoef,
+      nnu = nnu,
       nus = SPARres$nus,
       inds = SPARres$inds,
       RPMs = SPARres$RPMs,
@@ -356,9 +361,6 @@ plot.spar.cv <- function(x,
   mynummod <- nummod
   my_val_sum <- spar_res$val_sum
   colnames(my_val_sum)[match(c("mMeas", "mNumAct"),colnames(my_val_sum))] <- c("Meas", "numAct")
-  # my_val_sum <- dplyr::rename(spar_res$val_sum,
-  #                             Meas="mMeas",
-  #                             numAct="mNumAct")
 
   if (plot_type=="res-vs-fitted") {
     if (is.null(xfit) | is.null(yfit)) {
@@ -377,6 +379,7 @@ plot.spar.cv <- function(x,
       } else {
         tmp_title <- "Fixed given nummod="
       }
+      nu_1se <- coef(spar_res, opt_par = "1se")$nu
       tmp_df <- subset(my_val_sum,nummod==mynummod)
       ind_min <- which.min(tmp_df$Meas)
 
@@ -401,14 +404,14 @@ plot.spar.cv <- function(x,
                                           ymax=.data$Meas+.data$sdMeas),
                              alpha=0.2,linetype=2,show.legend = FALSE) +
         ggplot2::geom_point(ggplot2::aes(x = .data$x, y = .data$y),
-                   color=2,show.legend = FALSE,
-                   data=data.frame(x = c(tmp_df$nnu[ind_min],tmp_df$nnu[allowed_ind][ind_1se]),
-                                   y = c(tmp_df$Meas[ind_min],tmp_df$Meas[allowed_ind][ind_1se]))) +
-        ggplot2::annotate("segment",x = tmp_df$nnu[ind_min],
-                          y = tmp_df$Meas[ind_min] + tmp_df$sdMeas[ind_min],
-                          xend = tmp_df$nnu[allowed_ind][ind_1se],
-                          yend = tmp_df$Meas[ind_min] + tmp_df$sdMeas[ind_min],
-                          color=2,linetype=2)
+                   color="red",show.legend = FALSE,
+                   data=data.frame(x = c(tmp_df$nnu[ind_min],tmp_df$nnu[tmp_df$nu==nu_1se]),
+                                   y = c(tmp_df$Meas[ind_min],tmp_df$Meas[tmp_df$nu==nu_1se])))
+        # ggplot2::annotate("segment",x = tmp_df$nnu[ind_min],
+        #                   y = tmp_df$Meas[ind_min] + tmp_df$sdMeas[ind_min],
+        #                   xend = tmp_df$nnu[allowed_ind][ind_1se],
+        #                   yend = tmp_df$Meas[ind_min] + tmp_df$sdMeas[ind_min],
+        #                   color=2,linetype=2)
     } else {
       if (is.null(nu)) {
         nu <- my_val_sum$nu[which.min(my_val_sum$Meas)]
@@ -433,7 +436,7 @@ plot.spar.cv <- function(x,
                                           ymax=.data$Meas+.data$sdMeas),
                              alpha=0.2,linetype=2,show.legend = FALSE)+
         ggplot2::geom_point(ggplot2::aes(x = .data$x, y = .data$y),
-                            color=2,show.legend = FALSE,
+                            color="red",show.legend = FALSE,
                             data=data.frame(x = c(tmp_df$nummod[ind_min],tmp_df$nummod[allowed_ind][ind_1se]),
                                             y = c(tmp_df$Meas[ind_min],tmp_df$Meas[allowed_ind][ind_1se]))) +
         ggplot2::annotate("segment",x = tmp_df$nummod[ind_min],
@@ -460,8 +463,8 @@ plot.spar.cv <- function(x,
         ggplot2::geom_point() +
         ggplot2::geom_line() +
         # ggplot2::scale_x_continuous(breaks=seq(1,nrow(my_val_sum),1),labels=round(my_val_sum$nu,3)) +
-        ggplot2::scale_x_continuous(breaks=seq(1,nrow(my_val_sum),2),
-                                    labels=formatC(my_val_sum$nu[seq(1,nrow(my_val_sum),2)],
+        ggplot2::scale_x_continuous(breaks=seq(1,nrow(tmp_df),2),
+                                    labels=formatC(tmp_df$nu[seq(1,nrow(tmp_df),2)],
                                                    format = "e", digits = digits)) +
         ggplot2::labs(x=expression(nu)) +
         ggplot2::geom_point(ggplot2::aes(x = .data$x, y = .data$y),
@@ -482,7 +485,8 @@ plot.spar.cv <- function(x,
       allowed_ind <- tmp_df$Meas<tmp_df$Meas[ind_min]+tmp_df$sdMeas[ind_min]
       ind_1se <- which.min(tmp_df$numAct[allowed_ind])
 
-      res <- ggplot2::ggplot(data = tmp_df,ggplot2::aes(x=.data$nummod,y=.data$numAct)) +
+      res <- ggplot2::ggplot(data = tmp_df,
+        ggplot2::aes(x=.data$nummod,y=.data$numAct)) +
         ggplot2::geom_point() +
         ggplot2::geom_line() +
         ggplot2::geom_point(ggplot2::aes(x = .data$x, y = .data$y),
@@ -507,9 +511,13 @@ plot.spar.cv <- function(x,
                                   function(row)row[order(abs(row),decreasing = TRUE)])),
                           predictor=1:p)
     colnames(tmp_mat) <- c(1:nummod,"predictor")
-    tmp_df <- tidyr::pivot_longer(tmp_mat, cols = (1:nummod),
-                                  names_to = "marginal model",
-                                  values_to = "value")
+
+    tmp_df <- reshape(tmp_mat, idvar = "predictor",
+                      varying = seq_len(nummod),
+                      v.names = "value",
+                      timevar = "marginal model",
+                      direction = "long")
+
     tmp_df$`marginal model` <- as.numeric(tmp_df$`marginal model`)
 
     mrange <- max(Matrix::rowSums(spar_res$betas != 0))
@@ -541,16 +549,17 @@ print.spar.cv <- function(x, ...) {
   spar_res <- x
   mycoef_best <- coef(spar_res,opt_par = "best")
   mycoef_1se <- coef(spar_res,opt_par = "1se")
-  cat(sprintf("spar.cv object:\nSmallest CV-Meas %.1f reached for nummod=%d,
-              nu=%s leading to %d / %d active predictors.\n",
+  cat(sprintf(
+  "spar.cv object:\nSmallest CV-Meas %.1f reached for nummod=%d, nu=%s leading
+  to %d / %d active predictors.\n",
               min(spar_res$val_sum$mMeas),mycoef_best$nummod,
               formatC(mycoef_best$nu,digits = 2,format = "e"),
               sum(mycoef_best$beta!=0),length(mycoef_best$beta)))
   cat("Summary of those non-zero coefficients:\n")
   print(summary(mycoef_best$beta[mycoef_best$beta!=0]))
-  cat(sprintf("\nSparsest coefficient within one standard error of best CV-Meas
-              reached for nummod=%d, nu=%s \nleading to %d / %d active
-              predictors with CV-Meas %.1f.\n",
+  cat(sprintf(
+  "\nSparsest coefficient within one standard error of best CV-Meas reached for
+  nummod=%d, nu=%s \nleading to %d / %d active predictors with CV-Meas %.1f.\n",
               mycoef_1se$nummod,
               formatC(mycoef_1se$nu,digits = 2,format = "e"),
               sum(mycoef_1se$beta!=0),length(mycoef_1se$beta),
