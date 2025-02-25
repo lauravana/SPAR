@@ -17,3 +17,6 @@ vignette/SPAR.html
 *.aux
 *.blg
 *.log
+vignettes/*.rda
+vignettes/*.csv
+vignettes/*.mat
