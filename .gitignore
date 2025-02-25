@@ -9,3 +9,11 @@ vignette/SPAR.html
 vignette/SPAR.html
 vignette/SPAR.html
 /vignette/Figures
+/spar.Rcheck
+/spareg.Rcheck
+/vignettes/_extensions
+/vignettes/Figures
+/vignettes/SPAR_files
+*.aux
+*.blg
+*.log

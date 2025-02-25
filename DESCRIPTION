@@ -1,7 +1,7 @@
 Type: Package
-Package: spar
+Package: spareg
 Title: Sparse Projected Averaged Regression in R
-Version: 4.0.0
+Version: 4.1.0
 Authors@R:
     c(person(given = "Roman",
              family = "Parzer",
@@ -32,6 +32,10 @@ Roxygen: list(markdown = TRUE)
 Suggests: 
     testthat (>= 3.0.0),
     foreach,
-    doParallel
+    doParallel,
+    robustbase,
+    cellWise,
+    VariableScreening,
+    R.matlab
 Config/testthat/edition: 3
 Depends: R (>= 3.5.0) 
